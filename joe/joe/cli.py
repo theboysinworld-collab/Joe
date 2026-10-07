@@ -132,6 +132,9 @@ def repl() -> int:
 
     while True:
         try:
+            if getattr(agent, "_barge_event", None) is not None:
+                agent._barge_event.set()          # usuário digitou → corta a fala em curso
+                agent._barge_event.clear()
             line = input("\njoe ❯ ").strip()
         except (EOFError, KeyboardInterrupt):
             break
@@ -227,6 +230,23 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
         preds = mem.predict()
         print("\n".join(f"- {p['intent']} ({p['count']}x nesta hora)" for p in preds)
               or "(ainda sem padrões suficientes)")
+    elif cmd == "/voz":
+        arg = rest.strip().lower()
+        if arg in ("on", "ligar", "sim"):
+            import threading as _th
+            if getattr(agent, "_barge_event", None) is None:
+                agent._barge_event = _th.Event()
+            agent.config.auto_falar = True
+            agent.config.save()
+            print("🔊 modo voz ligado: o Joe fala as conclusões em background e para de")
+            print("   falar assim que você digita (barge-in). /voz off desliga.")
+        elif arg in ("off", "desligar", "nao", "não"):
+            agent._barge_event = None
+            agent.config.auto_falar = False
+            agent.config.save()
+            print("🔇 modo voz desligado (só texto).")
+        else:
+            print("uso: /voz on | /voz off")
     elif cmd == "/suggest":
         # dispara imediatamente o ciclo de proatividade do scheduler (sem esperar o tick)
         from .scheduler import scheduler

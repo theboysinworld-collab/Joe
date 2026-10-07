@@ -19,6 +19,8 @@ REGRAS DE ARQUITETURA (não violar ao adicionar funções):
 from __future__ import annotations
 
 import json
+import subprocess
+import threading
 from pathlib import Path
 
 from .config import Config, HISTORY_PATH, AUDIT_LOG
@@ -169,7 +171,9 @@ class Agent:
 
     def _maybe_speak(self, reply: str) -> None:
         """Voz automática ao concluir (config auto_falar). Silencioso e nunca fatal:
-        sem TTS no sistema ou erro de áudio, segue apenas texto."""
+        sem TTS no sistema ou erro de áudio, segue apenas texto.
+        Barge-in: com modo voz ativo (/voz), a fala roda em thread separada e é
+        interrompida assim que o usuário digita — ouvir/falar simultâneos."""
         try:
             if not getattr(self.config, "auto_falar", False) or self.subagent:
                 return
@@ -177,10 +181,34 @@ class Agent:
             if tool is None:
                 return
             short = reply[:400]
-            res = tool.run(text=short)
-            txt = getattr(res, "output", "") or ""
-            if "[sem motor de voz" in txt.lower():
-                self.config.auto_falar = False   # descobre uma vez, não insiste
+            barge = getattr(self, "_barge_event", None)   # threading.Event do /voz
+            if barge is None:                              # comportamento antigo: síncrono
+                res = tool.run(text=short)
+                txt = getattr(res, "output", "") or ""
+                if "[sem motor de voz" in txt.lower():
+                    self.config.auto_falar = False         # descobre uma vez, não insiste
+                return
+
+            def _speak_bg() -> None:
+                try:
+                    res = tool.run(text=short)
+                    txt = getattr(res, "output", "") or ""
+                    if "[sem motor de voz" in txt.lower():
+                        self.config.auto_falar = False
+                except Exception:                          # áudio nunca derruba o turno
+                    pass
+
+            t = threading.Thread(target=_speak_bg, daemon=True, name="joe-voz")
+            t.start()
+            # barge-in: se o usuário digitar antes de terminar, cancela a fala
+            if barge.wait(timeout=30):                     # True = usuário falou/ digitou
+                try:
+                    subprocess.run(["pkill", "-f", "espeak"], check=False,
+                                   capture_output=True)
+                    subprocess.run(["pkill", "-x", "say"], check=False,
+                                   capture_output=True)
+                except Exception:
+                    pass
         except Exception:
             pass
 
