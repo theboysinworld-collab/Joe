@@ -209,10 +209,25 @@ def _plan_read(text: str) -> list[dict]:
     return [{"name": "read_file", "args": {"path": target}}]
 
 
+# palavras de frase que nunca são nomes de pasta (evitar 'list_dir("pasta")')
+_STOP_DIR_WORDS = {"pasta", "diretorio", "diretorios", "atual", "raiz", "home",
+                   "projeto", "arquivos", "arquivo", "conteudo", "itens", "tudo"}
+
+
 def _plan_list(text: str) -> list[dict]:
     """'liste os arquivos [da pasta X]' → list_dir(X); sem pasta → '.' (raiz atual)."""
-    m = re.search(r"(?:na|da|em|pasta)\s+([~\w][\w./-]*)", _fold(text))
+    t = _fold(text)
+    # 1º) preposição + 'pasta X' (o nome depois de 'pasta' é o alvo real)
+    m = re.search(r"(?:na|da|em)\s+pasta\s+([~\w][\w./_-]*)", t)
+    if not m:
+        # 2º) caminho explícito com barra ou ponto (/tmp, ./src, ~/projetos)
+        m = re.search(r"(?<![\w.-])([~.]/[\w./-]+|/[\w./-]+)", t)
+    if not m:
+        # 3º) preposição + nome de diretório (joe, tests, src…)
+        m = re.search(r"(?:na|da|em)\s+(?:pasta\s+)?([~\w][\w._-]*)", t)
     path = m.group(1) if m else "."
+    if _fold(path) in _STOP_DIR_WORDS:      # 'da pasta' genérico → raiz atual
+        path = "."
     return [{"name": "list_dir", "args": {"path": path}}]
 
 

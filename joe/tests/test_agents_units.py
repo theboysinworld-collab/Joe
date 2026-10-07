@@ -102,3 +102,19 @@ def test_subagent_announce_ids_unicos():
     a, b = SubAgent("x", "g1"), SubAgent("y", "g2")
     assert a.id != b.id or a.goal != b.goal      # ids derivados de ms
     assert a.parent == "joe"
+
+
+# ------------------------------------------------------------- planner: intenção "listar"
+@pytest.mark.parametrize("texto,pasta", [
+    ("liste os arquivos da pasta joe", "joe"),
+    ("liste os arquivos da pasta", "."),          # 'pasta' genérico → raiz, nunca literal
+    ("liste os arquivos", "."),
+    ("o que tem na pasta tests", "tests"),        # nome após 'pasta' vence a preposição
+    ("liste tudo do projeto", "."),
+    ("liste os arquivos em /tmp", "/tmp"),
+    ("quais arquivos estao na pasta src agora", "src"),
+    ("conteudo da pasta ~/.config", "~/.config"),
+])
+def test_planner_listar_extrai_pasta_correta(texto, pasta):
+    plan = deterministic_plan(texto)
+    assert plan == [{"name": "list_dir", "args": {"path": pasta}}]
