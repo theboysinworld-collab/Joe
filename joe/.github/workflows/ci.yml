@@ -23,8 +23,8 @@ jobs:
           pip install -e . || true
       - name: Boot de verificação
         run: python run.py --check
-      - name: Suíte completa com cobertura (piso >= 85%)
-        run: pytest tests/ -q --cov=joe --cov-report=term --cov-fail-under=90
+      - name: Suíte completa com cobertura (piso >= 91%)
+        run: pytest tests/ -q --cov=joe --cov-report=term --cov-fail-under=91
       - name: Smoke E2E offline (planner determinístico)
         run: |
           python run.py --once "lembre-se que meu apelido é teste-ci"
