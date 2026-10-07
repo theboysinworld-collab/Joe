@@ -78,6 +78,10 @@ class Memory:
             self.db_path.rename(bak)
             self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self._init_schema()
+        # lock de escrita (reentrante): scheduler roda em thread daemon e REPL/
+        # sub-agentes na main — sqlite não serializa conexões compartilhadas.
+        import threading as _th
+        self._wlock = _th.RLock()
         self._migrate_legacy()
 
     # ------------------------------------------------------------ schema
@@ -131,55 +135,61 @@ class Memory:
 
     # ------------------------------------------------------------ escrita
     def remember(self, text: str, tag: str = "geral", source: str = "user") -> int:
-        cur = self.conn.execute(
-            "SELECT id FROM facts WHERE lower(text)=lower(?)", (text.strip(),))
-        vec = self._encode([text])[0]
-        if row := cur.fetchone():  # atualiza em vez de duplicar
-            self.conn.execute("UPDATE facts SET tag=?, ts=?, embedding=? WHERE id=?",
-                              (tag, time.time(), self._blob(vec), row[0]))
+        vec = self._encode([text])[0]   # fora do lock: pode tocar rede (ollama)
+        text = text.strip()
+        with self._wlock:
+            cur = self.conn.execute(
+                "SELECT id FROM facts WHERE lower(text)=lower(?)", (text,))
+            if row := cur.fetchone():  # atualiza em vez de duplicar
+                self.conn.execute("UPDATE facts SET tag=?, ts=?, embedding=? WHERE id=?",
+                                  (tag, time.time(), self._blob(vec), row[0]))
+                self.conn.commit()
+                return row[0]
+            cur = self.conn.execute(
+                "INSERT INTO facts(text,tag,ts,embedding,source) VALUES(?,?,?,?,?)",
+                (text, tag, time.time(), self._blob(vec), source))
             self.conn.commit()
-            return row[0]
-        cur = self.conn.execute(
-            "INSERT INTO facts(text,tag,ts,embedding,source) VALUES(?,?,?,?,?)",
-            (text.strip(), tag, time.time(), self._blob(vec), source))
-        self.conn.commit()
-        return cur.lastrowid
+            return cur.lastrowid
 
     def log_event(self, topic: str, payload: dict) -> None:
-        self.conn.execute("INSERT INTO events(topic,payload,ts) VALUES(?,?,?)",
-                          (topic, json.dumps(payload, ensure_ascii=False, default=str), time.time()))
-        self.conn.execute("INSERT INTO habits(key,hour,count,last_ts) VALUES(?,?,1,?) "
-                          "ON CONFLICT(key,hour) DO UPDATE SET count=count+1,last_ts=excluded.last_ts",
-                          (topic, int(time.localtime().tm_hour), time.time()))
-        self.conn.commit()
+        with self._wlock:
+            self.conn.execute("INSERT INTO events(topic,payload,ts) VALUES(?,?,?)",
+                              (topic, json.dumps(payload, ensure_ascii=False, default=str), time.time()))
+            self.conn.execute("INSERT INTO habits(key,hour,count,last_ts) VALUES(?,?,1,?) "
+                              "ON CONFLICT(key,hour) DO UPDATE SET count=count+1,last_ts=excluded.last_ts",
+                              (topic, int(time.localtime().tm_hour), time.time()))
+            self.conn.commit()
 
     def index_file(self, path: str, max_chunks: int = 40) -> int:
-        p = Path(path)
-        if not p.is_file():
-            return 0
-        try:
-            content = p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            return 0
-        # chunking com sobreposição de 200 chars (mantém contexto entre blocos)
-        size, overlap = 1200, 200
-        step = max(1, size - overlap)
-        chunks = [content[i:i + size] for i in range(0, len(content), step)][:max_chunks]
-        vecs = self._encode(chunks)
-        n = 0
-        for ch, v in zip(chunks, vecs):
-            self.conn.execute(
-                "INSERT INTO docs(path,chunk,ts,embedding) VALUES(?,?,?,?)",
-                (str(p), ch, time.time(), self._blob(v)))
-            n += 1
-        self.conn.commit()
-        return n
+        with self._wlock:
+            p = Path(path)
+            if not p.is_file():
+                return 0
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return 0
+            # chunking com sobreposição de 200 chars (mantém contexto entre blocos)
+            size, overlap = 1200, 200
+            step = max(1, size - overlap)
+            chunks = [content[i:i + size] for i in range(0, len(content), step)][:max_chunks]
+            vecs = self._encode(chunks)
+            n = 0
+            for ch, v in zip(chunks, vecs):
+                self.conn.execute(
+                    "INSERT INTO docs(path,chunk,ts,embedding) VALUES(?,?,?,?)",
+                    (str(p), ch, time.time(), self._blob(v)))
+                n += 1
+            self.conn.commit()
+            return n
 
     # ------------------------------------------------------------ leitura
     def forget(self, needle: str) -> int:
-        cur = self.conn.execute("DELETE FROM facts WHERE lower(text) LIKE ?", (f"%{needle.lower()}%",))
-        self.conn.commit()
-        return cur.rowcount
+        with self._wlock:
+            cur = self.conn.execute("DELETE FROM facts WHERE lower(text) LIKE ?",
+                                    (f"%{needle.lower()}%",))
+            self.conn.commit()
+            return cur.rowcount
 
     def facts(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(

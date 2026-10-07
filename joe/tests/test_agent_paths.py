@@ -127,10 +127,10 @@ def test_revisor_refaz_uma_vez_apenas(tmp_path, monkeypatch):
     monkeypatch.setattr("joe.agent.chat_completion", seq)
     monkeypatch.setattr("joe.agent.provider_registry", type("R", (), {"active": staticmethod(lambda: object())})())
     reply, intent = "ERRO: algo quebrou", "editar_codigo"
-    rv = Agent._review(reply, intent)
+    rv = ag._review(reply, intent)
     assert rv["verdict"] == "refazer"
-    assert Agent._review("tudo certo por aqui", "editar_codigo")["verdict"] == "ok"
-    assert Agent._review("", "conversar")["verdict"] == "refazer"
+    assert ag._review("tudo certo por aqui", "editar_codigo")["verdict"] == "ok"
+    assert ag._review("", "conversar")["verdict"] == "refazer"
     ag.memory.close()
 
 

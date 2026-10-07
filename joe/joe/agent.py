@@ -129,7 +129,7 @@ class Agent:
         self.messages.append({"role": "user", "content": user_text})
 
         # 2+3) PLANEJADOR + EXECUTOR
-        Agent._tool_results = {}      # turno novo: limpa registro de ferramentas p/ revisor
+        self._tool_results_i = {}     # turno novo: limpa registro de ferramentas p/ revisor
         has_llm = provider_registry.active() is not None
         reply = ""
         if has_llm:
@@ -144,14 +144,14 @@ class Agent:
             if has_llm:
                 self.messages.append({"role": "user",
                                       "content": f"[revisão] {review['note']}. Refaça corrigindo."})
-                Agent._tool_results = {}
+                self._tool_results_i = {}
                 reply = self._run_tool_loop(echo)
-            elif any(not ok for ok in Agent._tool_results.values()):
+            elif any(not ok for ok in self._tool_results.values()):
                 # offline: retrabalho honesto — re-plano com o erro visível na intenção
-                err_note = "; ".join(f"{t} falhou" for t, ok in Agent._tool_results.items() if not ok)
+                err_note = "; ".join(f"{t} falhou" for t, ok in self._tool_results.items() if not ok)
                 self._step("planejador", note=f"retrabalho após falha: {err_note}")
                 retry = self._run_offline_plan(user_text, intent, echo)
-                if not any(not ok for ok in Agent._tool_results.values()):
+                if not any(not ok for ok in self._tool_results.values()):
                     reply = retry
                 else:
                     reply += f"\n\n⚠ revisão: ainda há falhas ({err_note}) — refine o pedido."
@@ -190,7 +190,7 @@ class Agent:
                     echo(f"⚙ {fn}({_short(args)})")
                     bus.emit("agent.tool", agent=self.agent_id, tool=fn, args=_short(args))
                     result = registry.execute(fn, args)
-                    Agent._tool_results[fn] = result.ok
+                    self._tool_results[fn] = result.ok
                     if fn == "remember":
                         bus.emit("agent.memory", agent=self.agent_id, saved=str(args)[:120])
                     bus.emit("agent.tool_result", agent=self.agent_id, tool=fn,
@@ -244,15 +244,14 @@ class Agent:
             bus.emit("agent.plan_step", agent=self.agent_id, tool=step["name"],
                      args=_short(step["args"]))
             r = registry.execute(step["name"], step["args"])
-            Agent._tool_results[step["name"]] = r.ok
+            self._tool_results[step["name"]] = r.ok
             # executor reporta a decisão/resultado ao grafo (o que criou/executou)
             self._step("executor", note=f"{step['name']} → {r.as_text()[:60]}")
             outs.append(f"{step['name']}: {r.as_text()[:600]}")
         return "Executei seu pedido sem LLM (planner determinístico):\n\n" + "\n\n".join(outs)
 
     # ------------------------------------------------------------ revisor
-    @staticmethod
-    def _review(reply: str, intent: str) -> dict:
+    def _review(self, reply: str, intent: str) -> dict:
         if not reply.strip():
             return {"verdict": "refazer", "note": "resposta vazia"}
         fail_markers = ("ERRO:", "Traceback", "falhou")
@@ -260,14 +259,24 @@ class Agent:
             return {"verdict": "refazer", "note": "erros visíveis no resultado da tarefa de código"}
         # revisão de FERRAMENTA (não só do texto): se o turno executou ferramentas e
         # alguma falhou, o revisor detecta nos marcadores estruturados e exige retrabalho.
-        failed_tools = [t for t, ok in Agent._tool_results.items() if not ok]
+        failed_tools = [t for t, ok in self._tool_results.items() if not ok]
         if failed_tools:
             return {"verdict": "refazer",
                     "note": f"ferramenta(s) com falha não reportada: {', '.join(failed_tools[:3])}"}
         return {"verdict": "ok", "note": "resultado coerente com a intenção"}
 
     # registro por-turno de quais ferramentas rodaram e se passaram (limpo em chat())
-    _tool_results: dict[str, bool] = {}
+    # por instância (não classe): dois Agent simultâneos (ex.: sub-agente filho +
+    # REPL) não podem contaminar o registro de ferramentas um do outro
+    @property
+    def _tool_results(self) -> dict[str, bool]:
+        if not hasattr(self, "_tool_results_i"):
+            self._tool_results_i: dict[str, bool] = {}
+        return self._tool_results_i
+
+    @_tool_results.setter
+    def _tool_results(self, value: dict[str, bool]) -> None:
+        self._tool_results_i = value
 
     # ------------------------------------------------------------ histórico
     def _save_history(self, user_text: str, reply: str) -> None:
