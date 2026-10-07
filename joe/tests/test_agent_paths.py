@@ -134,6 +134,54 @@ def test_revisor_refaz_uma_vez_apenas(tmp_path, monkeypatch):
     ag.memory.close()
 
 
+# ------------------------------------------------- caminhos finos do tool loop
+def test_tool_loop_argumentsos_invalidos_e_memoria_evento(tmp_path, monkeypatch):
+    """JSON de argumentos corrompido → args={} graciosamente; ferramenta 'remember'
+    emite evento agent.memory no bus (linha 170)."""
+    ag, _ = make_agent(tmp_path)
+    seen = []
+    from joe import bus as BUS
+    stop = BUS.bus.subscribe("agent.memory", lambda e: seen.append(e))
+    turns = [
+        {"role": "assistant", "content": "vou lembrar", "tool_calls": [
+            {"id": "m1", "type": "function", "function": {
+                "name": "remember", "arguments": "{invalid-json"}}]},
+        {"role": "assistant", "content": "lembrei."},
+    ]
+    monkeypatch.setattr("joe.agent.chat_completion", lambda m, t, c: turns.pop(0))
+    monkeypatch.setattr("joe.agent.provider_registry", type("R", (), {"active": staticmethod(lambda: object())})())
+    try:
+        out = ag._run_tool_loop(echo=lambda s: None)
+        assert out == "lembrei."
+        assert len(seen) >= 1                       # evento de memória emitido
+        toolmsg = [m for m in ag.messages if m["role"] == "tool"][-1]
+        assert toolmsg["tool_call_id"] == "m1"      # mesmo com args inválidos o loop continua
+    finally:
+        stop(); ag.memory.close()
+
+
+def test_chat_com_llm_dispara_refazer_do_revisor(tmp_path, monkeypatch):
+    """Pipeline completo com LLM fake: resposta inicial com ERRO visível →
+    revisor manda refazer → segunda chamada do loop produz a versão final."""
+    ag, _ = make_agent(tmp_path)
+    monkeypatch.setattr(ag, "_classify_intent", lambda t: "editar_codigo")
+    monkeypatch.setattr(ag, "_run_offline_plan", lambda txt, intent, echo: "offline-nao-usado-aqui")
+    calls = {"n": 0}
+    def chat(m, t, c):
+        calls["n"] += 1
+        if calls["n"] == 1:   # primeira passada do agente
+            return {"role": "assistant", "content": "ERRO: quebrou", "tool_calls": None}
+        if calls["n"] == 2:   # retrabalho pedido pelo revisor
+            return {"role": "assistant", "content": "pronto e corrigido", "tool_calls": None}
+        raise AssertionError("não deve haver 3ª chamada (revisor refaz só uma vez)")
+    monkeypatch.setattr("joe.agent.chat_completion", chat)
+    monkeypatch.setattr("joe.agent.provider_registry", type("R", (), {"active": staticmethod(lambda: object())})())
+    out = ag.chat("refatore x.py", echo=lambda s: None)
+    assert "corrigido" in out
+    assert calls["n"] == 2
+    ag.memory.close()
+
+
 def test_reset_e_child(tmp_path):
     ag, _ = make_agent(tmp_path)
     ag.messages.append({"role": "user", "content": "x"})
