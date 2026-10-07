@@ -1,5 +1,6 @@
-# Desativa plugins externos problemáticos (ex.: libtmux antigo, incompatível
-# com pytest 9) antes de qualquer plugin ser carregado.
 import os
+import tempfile
 
-os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+# isola TODAS as leituras de ~/.joe durante os testes (config, SQLite, extensões)
+_tmp = tempfile.mkdtemp(prefix="joe_test_home_")
+os.environ["JOE_HOME"] = _tmp

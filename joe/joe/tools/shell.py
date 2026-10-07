@@ -1,4 +1,4 @@
-"""Ferramenta de shell: execução de comandos bash com segurança básica."""
+"""Ferramenta de shell: execução de comandos bash com política de segurança."""
 
 from __future__ import annotations
 
@@ -7,16 +7,13 @@ import subprocess
 from .base import Tool, ToolResult, registry
 from ..config import Config
 
-# padrões de comandos destrutivos que exigem confirmação mesmo em modo auto
 DANGEROUS = ("rm -rf /", "mkfs", "dd if=", ":(){", ">dev/sd", "shutdown", "reboot")
 
 
 class ShellTool(Tool):
     name = "bash"
-    description = (
-        "Executa um comando bash no diretório de trabalho do projeto e retorna stdout/stderr. "
-        "Use para compilar, rodar testes, inspecionar o sistema etc."
-    )
+    description = ("Executa um comando bash no diretório de trabalho e retorna stdout/stderr. "
+                   "Use para compilar, rodar testes, inspecionar o sistema.")
     parameters = {
         "type": "object",
         "properties": {
@@ -28,7 +25,6 @@ class ShellTool(Tool):
 
     def __init__(self, config: Config, confirm_fn=None):
         self.config = config
-        # confirm_fn(prompt) -> bool; se None, usa input()
         self.confirm_fn = confirm_fn
 
     def _confirm(self, command: str) -> bool:
@@ -48,24 +44,17 @@ class ShellTool(Tool):
         if not self._confirm(command):
             return ToolResult(ok=False, output="usuário cancelou a execução do comando")
         try:
-            proc = subprocess.run(
-                ["bash", "-lc", command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                errors="replace",
-            )
+            proc = subprocess.run(["bash", "-lc", command], capture_output=True,
+                                  text=True, timeout=timeout, errors="replace")
         except subprocess.TimeoutExpired:
             return ToolResult(ok=False, output=f"timeout após {timeout}s")
         out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
         limit = self.config.shell_output_limit
         if len(out) > limit:
             out = out[:limit] + f"\n...[saída truncada em {limit} chars]"
-        return ToolResult(
-            ok=proc.returncode == 0,
-            output=out.strip() or f"(exit code {proc.returncode})",
-            meta={"exit_code": proc.returncode},
-        )
+        return ToolResult(ok=proc.returncode == 0,
+                          output=out.strip() or f"(exit code {proc.returncode})",
+                          meta={"exit_code": proc.returncode})
 
 
 registry.register(ShellTool(Config.load()))

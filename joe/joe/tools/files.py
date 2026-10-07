@@ -1,7 +1,8 @@
-"""Ferramentas de arquivos: ler, escrever, listar."""
+"""Ferramentas de arquivos: ler, escrever, editar exato, listar, buscar, indexar p/ RAG."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .base import Tool, ToolResult, registry
@@ -9,108 +10,117 @@ from .base import Tool, ToolResult, registry
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"}
 
 
-def _resolve(path: str) -> Path:
-    p = Path(path).expanduser()
-    return p if p.is_absolute() else Path.cwd() / p
-
-
 class ReadFileTool(Tool):
     name = "read_file"
-    description = "Lê um arquivo de texto e retorna seu conteúdo (com números de linha)."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "start_line": {"type": "integer", "description": "linha inicial (1-based, opcional)"},
-            "end_line": {"type": "integer", "description": "linha final (opcional)"},
-        },
-        "required": ["path"],
-    }
+    description = "Lê um arquivo de texto (com números de linha). Args: path, start?, count?"
+    parameters = {"type": "object", "properties": {
+        "path": {"type": "string"}, "start": {"type": "integer"}, "count": {"type": "integer"}},
+        "required": ["path"]}
 
-    def run(self, path: str, start_line: int | None = None, end_line: int | None = None) -> ToolResult:
-        p = _resolve(path)
-        if not p.exists():
-            return ToolResult(ok=False, output=f"arquivo não encontrado: {p}")
-        if p.is_dir():
-            return ToolResult(ok=False, output=f"{p} é um diretório; use list_dir")
+    def run(self, path: str, start: int = 1, count: int = 400) -> ToolResult:
+        p = Path(path)
+        if not p.is_file():
+            return ToolResult(ok=False, output=f"não existe: {path}")
         lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        s = max(1, start_line or 1)
-        e = min(len(lines), end_line or len(lines))
-        body = "\n".join(f"{i:>5} | {lines[i - 1]}" for i in range(s, e + 1))
-        return ToolResult(output=body or "(arquivo vazio)", meta={"total_lines": len(lines)})
+        chunk = lines[start - 1:start - 1 + count]
+        body = "\n".join(f"{i+start:5d}| {l}" for i, l in enumerate(chunk))
+        return ToolResult(output=body or "(vazio)", meta={"total_lines": len(lines)})
 
 
 class WriteFileTool(Tool):
     name = "write_file"
-    description = "Cria ou sobrescreve um arquivo de texto com o conteúdo dado (cria diretórios se preciso)."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "content": {"type": "string"},
-        },
-        "required": ["path", "content"],
-    }
+    description = "Cria/sobrescreve um arquivo com o conteúdo dado. Args: path, content."
+    parameters = {"type": "object", "properties": {
+        "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}
 
     def run(self, path: str, content: str) -> ToolResult:
-        p = _resolve(path)
+        p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        existed = p.exists()
         p.write_text(content, encoding="utf-8")
-        n = len(content.splitlines())
-        return ToolResult(output=f"{'atualizado' if existed else 'criado'}: {p} ({n} linhas)")
+        return ToolResult(output=f"escrito {p} ({len(content)} chars)")
 
 
 class EditFileTool(Tool):
     name = "edit_file"
-    description = "Substitui exatamente uma ocorrência de `old_text` por `new_text` em um arquivo."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "old_text": {"type": "string"},
-            "new_text": {"type": "string"},
-        },
-        "required": ["path", "old_text", "new_text"],
-    }
+    description = ("Substituição EXATA old→new em um arquivo (falha se ambíguo/não achado). "
+                   "Args: path, old, new, replace_all?")
+    parameters = {"type": "object", "properties": {
+        "path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"},
+        "replace_all": {"type": "boolean"}}, "required": ["path", "old", "new"]}
 
-    def run(self, path: str, old_text: str, new_text: str) -> ToolResult:
-        p = _resolve(path)
-        if not p.exists():
-            return ToolResult(ok=False, output=f"arquivo não encontrado: {p}")
+    def run(self, path: str, old: str, new: str, replace_all: bool = False) -> ToolResult:
+        p = Path(path)
+        if not p.is_file():
+            return ToolResult(ok=False, output=f"não existe: {path}")
         text = p.read_text(encoding="utf-8")
-        count = text.count(old_text)
-        if count == 0:
-            return ToolResult(ok=False, output="texto antigo não encontrado no arquivo")
-        if count > 1:
-            return ToolResult(ok=False, output=f"texto antigo aparece {count}x; seja mais específico")
-        p.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-        return ToolResult(output=f"editado: {p}")
+        n = text.count(old)
+        if n == 0:
+            return ToolResult(ok=False, output="texto old não encontrado (leia o arquivo antes)")
+        if n > 1 and not replace_all:
+            return ToolResult(ok=False, output=f"old aparece {n}x — refine ou use replace_all")
+        p.write_text(text.replace(old, new), encoding="utf-8")
+        return ToolResult(output=f"editado {path} ({n} substituições)")
 
 
 class ListDirTool(Tool):
     name = "list_dir"
-    description = "Lista arquivos e subdiretórios (até 2 níveis) ignorando pastas como .git/node_modules."
-    parameters = {
-        "type": "object",
-        "properties": {"path": {"type": "string", "description": "diretório (padrão: cwd)"}},
-    }
+    description = "Lista um diretório (2 níveis). Args: path?"
+    parameters = {"type": "object", "properties": {"path": {"type": "string"}}}
 
     def run(self, path: str = ".") -> ToolResult:
-        root = _resolve(path)
+        root = Path(path)
         if not root.is_dir():
-            return ToolResult(ok=False, output=f"diretório não encontrado: {root}")
+            return ToolResult(ok=False, output=f"não é diretório: {path}")
         out = []
-        for item in sorted(root.rglob("*")):
-            rel_parts = item.relative_to(root).parts
-            if any(part in IGNORE_DIRS for part in rel_parts):
+        for item in sorted(root.iterdir()):
+            if item.name.startswith(".") and item.name != ".":
                 continue
-            if len(rel_parts) > 2:
-                continue
-            suffix = "/" if item.is_dir() else ""
-            out.append(f"{item.relative_to(root)}{suffix}")
-        return ToolResult(output="\n".join(out) or "(vazio)", meta={"count": len(out)})
+            out.append(item.name + ("/" if item.is_dir() else ""))
+            if item.is_dir() and item.name not in IGNORE_DIRS:
+                for sub in sorted(item.iterdir())[:12]:
+                    if not sub.name.startswith("."):
+                        out.append(f"  {sub.name}{'/' if sub.is_dir() else ''}")
+        return ToolResult(output="\n".join(out) or "(vazio)")
 
 
-for t in (ReadFileTool(), WriteFileTool(), EditFileTool(), ListDirTool()):
+class GrepTool(Tool):
+    name = "grep"
+    description = "Busca regex em arquivos do projeto. Args: pattern, path?, glob?"
+    parameters = {"type": "object", "properties": {
+        "pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}},
+        "required": ["pattern"]}
+
+    def run(self, pattern: str, path: str = ".", glob: str = "**/*") -> ToolResult:
+        rx = re.compile(pattern)
+        hits, root = [], Path(path)
+        for f in root.glob(glob):
+            if not f.is_file() or any(d in f.parts for d in IGNORE_DIRS):
+                continue
+            try:
+                for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                    if rx.search(line):
+                        hits.append(f"{f}:{i}: {line.strip()[:160]}")
+                        if len(hits) >= 80:
+                            raise StopIteration
+            except (UnicodeDecodeError, PermissionError, IsADirectoryError):
+                continue
+            except StopIteration:
+                break
+        return ToolResult(output="\n".join(hits) or "(nada encontrado)")
+
+
+class IndexTool(Tool):
+    name = "index_for_rag"
+    description = "Indexa um arquivo na memória vetorial (RAG). Args: path."
+    parameters = {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
+
+    def run(self, path: str) -> ToolResult:
+        from ..memory import Memory
+        m = Memory()
+        n = m.index_file(path)
+        return ToolResult(output=f"{n} chunks de {path} indexados para RAG" if n
+                          else f"nada indexado ({path})")
+
+
+for t in (ReadFileTool(), WriteFileTool(), EditFileTool(), ListDirTool(), GrepTool(), IndexTool()):
     registry.register(t)

@@ -1,67 +1,63 @@
-"""Ferramentas de memória longa do agente."""
+"""Ferramentas de memória: lembrar, esquecer, RAG, listar fatos."""
 
 from __future__ import annotations
 
 from .base import Tool, ToolResult, registry
-from ..memory import Memory
+
+
+def _mem():
+    from ..memory import Memory  # late import (evita ciclo)
+    return Memory()
 
 
 class RememberTool(Tool):
     name = "remember"
-    description = "Salva um fato durável na memória persistente (preferências do usuário, decisões de projeto etc.)."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "text": {"type": "string", "description": "fato a memorizar (curto, uma frase)"},
-            "tag": {"type": "string", "description": "categoria: preferencia, projeto, pessoa, tarefa..."},
-        },
-        "required": ["text"],
-    }
-
-    def __init__(self, memory: Memory):
-        self.memory = memory
+    description = "Guarda um fato durável na memória persistente (SQLite+vetor). Args: text, tag?"
+    parameters = {"type": "object", "properties": {
+        "text": {"type": "string"}, "tag": {"type": "string"}}, "required": ["text"]}
 
     def run(self, text: str, tag: str = "geral") -> ToolResult:
-        self.memory.remember(text, tag)
-        return ToolResult(output=f"memorizado: [{tag}] {text}")
-
-
-class RecallTool(Tool):
-    name = "recall"
-    description = "Busca fatos na memória persistente por palavra-chave. Vazio = lista tudo."
-    parameters = {
-        "type": "object",
-        "properties": {"query": {"type": "string"}},
-    }
-
-    def __init__(self, memory: Memory):
-        self.memory = memory
-
-    def run(self, query: str = "") -> ToolResult:
-        facts = self.memory.search(query) if query else self.memory.facts
-        if not facts:
-            return ToolResult(ok=False, output="nada na memória sobre isso")
-        return ToolResult(output="\n".join(f"- [{f['tag']}] {f['text']}" for f in facts))
+        mid = _mem().remember(text, tag=tag, source="agent")
+        return ToolResult(output=f"memorizado #{mid}: [{tag}] {text}")
 
 
 class ForgetTool(Tool):
     name = "forget"
-    description = "Remove da memória persistente todos os fatos que contenham a palavra-chave."
-    parameters = {
-        "type": "object",
-        "properties": {"query": {"type": "string"}},
-        "required": ["query"],
-    }
+    description = "Remove fatos que contenham o trecho dado. Args: needle."
+    parameters = {"type": "object", "properties": {"needle": {"type": "string"}}, "required": ["needle"]}
 
-    def __init__(self, memory: Memory):
-        self.memory = memory
+    def run(self, needle: str) -> ToolResult:
+        n = _mem().forget(needle)
+        return ToolResult(output=f"{n} fato(s) removidos")
+
+
+class RecallTool(Tool):
+    name = "recall"
+    description = "Busca lexical simples na memória. Args: query."
+    parameters = {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
 
     def run(self, query: str) -> ToolResult:
-        n = self.memory.forget(query)
-        return ToolResult(output=f"removido(s) {n} fato(s) contendo {query!r}")
+        hits = _mem().search(query, k=8)
+        return ToolResult(output="\n".join(f"[{h['kind']}|{h['score']}] {h['text'][:200]}" for h in hits)
+                          or "(nada na memória)")
 
 
-_mem = Memory()
-registry.register(RememberTool(_mem))
-registry.register(RecallTool(_mem))
-registry.register(ForgetTool(_mem))
+class RagSearchTool(Tool):
+    name = "rag_search"
+    description = ("Busca SEMÂNTICO-VETORIAL (RAG) em fatos + documentos indexados. "
+                   "Use antes de perguntar ao usuário. Args: query, k?")
+    parameters = {"type": "object", "properties": {
+        "query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}
+
+    def run(self, query: str, k: int = 6) -> ToolResult:
+        hits = _mem().search(query, k=k)
+        if not hits:
+            return ToolResult(output="(nenhum trecho relevante — índice vazio ou tema novo)")
+        out = []
+        for h in hits:
+            out.append(f"• ({h['kind']}, score {h['score']}) [{h['tag']}]\n{h['text']}")
+        return ToolResult(output="\n\n".join(out))
+
+
+for t in (RememberTool(), ForgetTool(), RecallTool(), RagSearchTool()):
+    registry.register(t)

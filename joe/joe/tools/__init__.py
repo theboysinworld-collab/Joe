@@ -1,2 +1,6 @@
-from .base import Tool, ToolResult, registry  # noqa: F401
-from . import shell, files, search, memory_tools  # noqa: F401
+"""Ponto de inicialização das ferramentas centrais.
+
+NÃO importa nada automaticamente: quem orquestra a ordem é `joe.cli._boot()`
+(extensões primeiro, depois tools, providers, capacidades). Importar este pacote
+não tem efeitos colaterais — evita ciclos config↔tools.
+"""
