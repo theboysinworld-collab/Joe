@@ -1,7 +1,12 @@
+# Compiled/Binary files
+*.pyc
+
+# Dependency directories
 __pycache__/
-*.pycnode_modules/
+
+# Coverage reports
+.coveragenode_modules/
 .next/
 dist/
 build/
 *.log
-node_modules/

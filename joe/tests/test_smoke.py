@@ -78,6 +78,7 @@ def test_offline_plan_executes_without_llm(cfg, tmp_path, monkeypatch):
     prov.write_text("conteúdo secreto 42")
     monkeypatch.chdir(tmp_path)
     calls = []
+    mark = len(bus.replay)  # snapshot ANTES do chat: isola dos eventos de outros testes
     real_exec = registry.execute
     monkeypatch.setattr(registry, "execute",
                         lambda name, args=None: calls.append((name, args)) or ToolResult(output="ok"))
@@ -85,8 +86,10 @@ def test_offline_plan_executes_without_llm(cfg, tmp_path, monkeypatch):
     reply = agent.chat(f"leia o arquivo {prov.name}")
     assert calls and calls[0][0] == "read_file"     # agiu SEM nenhum LLM
     assert "planner determinístico" in reply
-    # grafo registrou o fluxo completo: intenção→...→conclusão
-    roles = [e.get("role") for e in bus.replay if e["topic"] == "agent.step"]
+    # grafo registrou o fluxo completo: intenção→...→conclusão.
+    # snapshot no início do chat: isolado de eventos globais (bus.replay é um anel
+    # compartilhado entre instâncias/turnos e pode ser preenchido antes deste teste).
+    roles = [e.get("role") for e in bus.replay[mark:] if e["topic"] == "agent.step"]
     assert ["intencao", "planejador", "revisor", "conclusao"] == \
         [r for r in roles if r in ("intencao", "planejador", "revisor", "conclusao")]
 
