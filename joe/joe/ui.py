@@ -31,9 +31,18 @@ PIPELINE = ["usuário", "intenção", "planejador", "executor", "revisor", "conc
 class GraphState:
     nodes: dict[str, dict] = field(default_factory=dict)     # id -> {label, last_note, ts}
     edges: list[tuple[str, str]] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)     # proatividade (cooldown/limite)
 
     def touch(self, nid: str, note: str = "") -> None:
         self.nodes[nid] = {"label": nid, "note": note[:60], "ts": time.time()}
+
+    def add_suggestion(self, text: str) -> None:
+        """Enfileira sugestão proativa; deduplica e limita a 5 recentes."""
+        t = str(text).strip()
+        if not t or t in self.suggestions:
+            return
+        self.suggestions.append(t)
+        self.suggestions = self.suggestions[-5:]
 
 
 STATE = GraphState()
@@ -70,6 +79,13 @@ def _listener(ev: dict) -> None:
         STATE.edges.append((p["frm"], p["to"]))
     elif t == "ext.tool_added":
         STATE.touch("extensões", f"+ {p['tool']}")
+    elif t == "suggest":
+        # proatividade do scheduler: intenções recorrentes nesta hora
+        for it in p.get("items", []):
+            STATE.add_suggestion(str(it))
+    elif t.startswith("sense."):
+        # sensores do scheduler viram nós vivos no grafo
+        STATE.touch(p["topic"].split(".", 1)[1], f"👁 {str(p.get('observation', ''))[:40]}")
 
 
 _ROLE_MAP = {"intencao": "intenção", "planejador": "planejador", "executor": "executor",
@@ -78,6 +94,8 @@ _ROLE_MAP = {"intencao": "intenção", "planejador": "planejador", "executor": "
 _PIPELINE_ROLES = ("intencao", "planejador", "executor", "revisor", "conclusao")
 bus.subscribe("agent", _listener)
 bus.subscribe("ext", _listener)
+bus.subscribe("suggest", _listener)   # proatividade do scheduler → grafo
+bus.subscribe("sense.", _listener)     # sensores do scheduler → nós vivos
 
 
 def render_graph(width: int = 72, opacity_pct: int = 35) -> Text:
@@ -126,6 +144,10 @@ def render_graph(width: int = 72, opacity_pct: int = 35) -> Text:
     legend = ", ".join(f"{nid}[{STATE.nodes[nid]['note'][:28]}]" if STATE.nodes[nid]["note"] else nid
                        for nid in ids[-8:])
     out.append(f"\n  · rede: {legend}", style="cyan dim")
+    if STATE.suggestions:
+        # proatividade visível ao centro da interface (linha própria, discreta)
+        sug = "  •  ".join(STATE.suggestions[-3:])
+        out.append(f"\n  ✦ sugerido: {sug}", style="yellow")
     return out
 
 
@@ -142,6 +164,16 @@ def graph_panel() -> Panel:
 class UI:
     def __init__(self) -> None:
         self.console = Console()
+        # proatividade: quando o scheduler sugere algo, mostramos imediatamente
+        bus.subscribe("suggest", self._on_suggest)
+
+    def _on_suggest(self, ev: dict) -> None:
+        items = ev.get("items") or []
+        if items:
+            try:
+                self.console.print(Text(f"✦ joe sugere: {', '.join(map(str, items))}", style="yellow"))
+            except Exception:
+                pass
 
     def header(self, provider: str, model: str, tools: int, mode: str) -> None:
         # NOTE: kwargs de layout pertencem ao Panel, não a Console.print()

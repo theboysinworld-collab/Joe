@@ -183,6 +183,15 @@ class Agent:
         self._step("planejador", mode="determinístico-offline", intent=intent)
         plan = deterministic_plan(user_text)
         if not plan:
+            # auto-expansão: se a intenção não tem playbook mas existe ferramenta
+            # com esse nome registrado (ex.: núcleo criado por extensão), usa-a.
+            # Assim o sistema ganha capacidades novas SEM editar o núcleo.
+            from .tools.base import registry as _reg
+            guess = intent.replace("-", "_")
+            if _reg.get(guess):
+                plan = [{"name": guess, "args": {"text": user_text}}]
+                self._step("executor", note=f"auto-expansão → {guess}")
+        if not plan:
             return (
                 f"Entendi sua intenção como **{intent}** (score da análise semântica).\n"
                 "Sem LLM disponível eu executo ações diretas; para esta tarefa eu precisaria de:\n"

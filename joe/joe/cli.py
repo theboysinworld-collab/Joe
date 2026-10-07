@@ -211,6 +211,14 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
         preds = mem.predict()
         print("\n".join(f"- {p['intent']} ({p['count']}x nesta hora)" for p in preds)
               or "(ainda sem padrões suficientes)")
+    elif cmd == "/suggest":
+        # dispara imediatamente o ciclo de proatividade do scheduler (sem esperar o tick)
+        from .scheduler import scheduler
+        from .ui import STATE
+        n = len(STATE.suggestions)
+        scheduler._maybe_suggest()          # emite "suggest" no bus → UI/grafo atualizam
+        novo = STATE.suggestions[n:]
+        print("✦ " + (", ".join(novo) if novo else "nenhuma sugestão nova agora"))
     elif cmd == "/analyze":
         from .auto import SelfAnalysis
         sa = SelfAnalysis(cfg, mem)
