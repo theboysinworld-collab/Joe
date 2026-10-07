@@ -43,6 +43,8 @@ def test_falar_sem_motor_devolve_texto_nunca_explode(fake_which, monkeypatch):
 
 def test_falar_com_espeak_chama_subprocess(fake_which, monkeypatch):
     fake_which({"espeak"})
+    import glob as _g
+    monkeypatch.setattr(_g, "glob", lambda pat: ["/fake"] if "pt" in pat else [])  # voz pt instalada
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd))
     out = C.SpeechCapability().perceive(text="oi")

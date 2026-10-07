@@ -56,11 +56,13 @@ def test_speech_no_engine_fallback(monkeypatch):
 
 def test_speech_espeak(monkeypatch):
     monkeypatch.setattr(cap.shutil, "which", lambda n: "/usr/bin/espeak" if n == "espeak" else None)
+    import glob as _g
+    monkeypatch.setattr(_g, "glob", lambda pat: ["/fake"] if "pt" in pat else [])  # voz pt instalada
     calls = _stub_run(monkeypatch)
     c = cap.SpeechCapability()
     assert c.available()
     out = c.perceive(text="olá mundo")
-    assert "falei (via espeak)" in out
+    assert "falei (via espeak" in out and "pt-BR" in out
     assert calls[0][0] == "espeak"
 
 

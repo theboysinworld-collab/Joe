@@ -41,6 +41,9 @@ class Capability:
 class SpeechCapability(Capability):
     name = "falar"
 
+    def __init__(self, language: str = "pt-BR") -> None:
+        self.language = language or "pt-BR"
+
     def available(self) -> bool:
         return bool(self._engine())
 
@@ -55,21 +58,63 @@ class SpeechCapability(Capability):
             return "pyttsx3"
         return ""
 
+    def _voice_ok(self, engine: str) -> bool:
+        """Verifica se o pacote de voz pt do espeak está instalado; se faltar, tenta baixar."""
+        if engine not in ("espeak", "espeak-ng"):
+            return True  # say/pyttsx3 gerenciam voz internamente
+        import glob
+        if glob.glob("/usr/share/espeak*/voices/*pt*") or \
+           glob.glob("/usr/lib*/espeak*/voices/*pt*"):
+            return True
+        # sem rede ou sem permissão → não derruba nada; só sinaliza p/ fallback textual
+        try:
+            import urllib.request
+            urllib.request.urlopen("https://pypi.org", timeout=3)
+        except Exception:
+            return False
+        for installer in ("apt-get", "dnf", "pacman"):
+            if not shutil.which(installer):
+                continue
+            cmd = {"apt-get": ["apt-get", "install", "-y", "espeak-ng-data"],
+                   "dnf": ["dnf", "install", "-y", "espeak-ng"],
+                   "pacman": ["pacman", "-S", "--noconfirm", "--needed", "espeak-ng"]}[installer]
+            if shutil.which("sudo"):
+                cmd = ["sudo", "-n"] + cmd   # -n: falha rápido se não houver senha salva
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+                if r.returncode == 0 and self._voice_ok(engine):
+                    return True
+            except Exception:
+                pass
+        return False
+
     def perceive(self, text: str = "", **_) -> str:
         engine = self._engine()
         if not engine:
             return f"[sem motor de voz — texto para fala]: {text}"
         if engine == "say":
-            subprocess.run(["say", text], check=False)
+            lang = "Brazilian Portuguese" if self.language.startswith("pt") else self.language
+            r = subprocess.run(["say", "-v", lang, text], capture_output=True, text=True, check=False)
+            if r.returncode != 0:   # voz BR ausente no macOS → tenta sem -v antes de desistir
+                subprocess.run(["say", text], check=False)
         elif engine in ("espeak", "espeak-ng"):
+            if not self._voice_ok(engine):
+                return (f"[voz pt indisponível — instale com: sudo apt install espeak-ng-data "
+                        f"(ou dnf/pacman equivalente); fallback textual]: {text}")
             subprocess.run([engine, "-v", "pt-br", text], check=False)
         else:
             try:
                 import pyttsx3
-                pyttsx3.init().say(text).runAndWait()
+                eng = pyttsx3.init()
+                if self.language.startswith("pt"):
+                    for v in eng.getProperty("voices").values():
+                        if "pt" in (v.id or "").lower() or "brazil" in (getattr(v, "name", "") or "").lower():
+                            eng.setProperty("voice", v.id)
+                            break
+                eng.say(text).runAndWait()
             except Exception as e:   # motor virou quebrado em runtime → não derruba o turno
                 return f"[sem motor de voz — texto para fala]: {text} (pyttsx3 falhou: {e})"
-        return f"falei (via {engine}): {text[:80]}"
+        return f"falei (via {engine}, {self.language}): {text[:80]}"
 
 
 class HearingCapability(Capability):
@@ -301,7 +346,8 @@ capability_registry = CapabilityRegistry()
 
 
 def bootstrap_capabilities(config: Config) -> CapabilityRegistry:
-    for cap in (SpeechCapability(), HearingCapability(), ScreenCapability(),
+    for cap in (SpeechCapability(language=getattr(config, "language", "pt-BR")),
+                HearingCapability(), ScreenCapability(),
                 CameraCapability(), PhoneCapability(), ImageGenCapability(),
                 VideoEditCapability(), WebSearchCapability()):
         capability_registry.register(cap)
