@@ -275,9 +275,18 @@ def _first_path(text: str) -> str:
     return "(no arquivo indicado — especifique o caminho)"
 
 
+_SUB_STOP = ("para", "pra", "que", "de", "o", "a", "um", "uma",
+             "chamado", "chamada", "nome", "nomeado", "apelidado")
+
+
 def _sub_name(text: str) -> str:
-    m = re.search(r"(?:sub[- ]?agente|agente)\s+([a-z][\w-]+)", _fold(text))
-    if m and m.group(1) not in ("para", "pra", "que", "de", "o", "a", "um", "uma"):
+    t = _fold(text)
+    # forma explicita: "chamado X", "nomeado X", "com nome X" (mais preciso que posicao)
+    m = re.search(r"(?:chamad[oa]|nomead[oa]|apelidad[oa]|com nome|nome)\s+([a-z][\w-]+)", t)
+    if m and m.group(1) not in ("de", "do", "da", "o", "a"):
+        return m.group(1)
+    m = re.search(r"(?:sub[- ]?agente|agente)\s+([a-z][\w-]+)", t)
+    if m and m.group(1) not in _SUB_STOP:
         return m.group(1)
     return "filho"
 

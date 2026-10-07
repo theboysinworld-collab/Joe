@@ -77,7 +77,8 @@ def test_cosine_parcial_com_dimensoes_diferentes():
 # ---------------------------------------------------------------- SQLite: dedupe, docs, eventos
 def test_index_file_e_busca_doc(tmp_path, cfg):
     f = tmp_path / "proj.txt"
-    f.write_text("kubernetes orquestra contêineres" * 30, encoding="utf-8")
+    # ~3000 chars => 2 chunks com sobreposição de 200 (1200-200=1000 de passo)
+    f.write_text(("kubernetes orquestra contêineres " * 90), encoding="utf-8")
     m = Memory(db_path=tmp_path / "i.db", config=cfg)
     n = m.index_file(str(f))
     assert n >= 2                                        # chunking funcionando

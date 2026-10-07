@@ -24,8 +24,10 @@ from pathlib import Path
 from .config import Config, HISTORY_PATH, AUDIT_LOG
 from .llm import LLMError, chat_completion, provider_registry, bootstrap, auto_select
 from .memory import Memory
-from .tools.base import registry
+from .tools.base import registry, bootstrap_tools
 from .tools.shell import ShellTool
+bootstrap_tools()  # garante que todas as ferramentas embutidas (incl. agent_tools)
+# estejam no registry mesmo quando o Agent é usado sem o boot completo (run.py/cli)
 from .agents import classify_intent, deterministic_plan, spawn_subagent
 from .bus import bus
 

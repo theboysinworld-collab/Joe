@@ -148,7 +148,10 @@ class Memory:
             content = p.read_text(encoding="utf-8", errors="replace")
         except Exception:
             return 0
-        chunks = [content[i:i + 1200] for i in range(0, len(content), 1000)][:max_chunks]
+        # chunking com sobreposição de 200 chars (mantém contexto entre blocos)
+        size, overlap = 1200, 200
+        step = max(1, size - overlap)
+        chunks = [content[i:i + size] for i in range(0, len(content), step)][:max_chunks]
         vecs = self._encode(chunks)
         n = 0
         for ch, v in zip(chunks, vecs):
