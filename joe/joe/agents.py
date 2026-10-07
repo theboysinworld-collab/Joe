@@ -89,6 +89,8 @@ INTENT_PROFILES: dict[str, list[str]] = {
                 "abre o app", "liga para", "instagram", "telegram", "aplicativo", "app"],
     "conversar": ["oi", "ola", "bom dia", "boa noite", "quem e voce", "obrigado",
                   "valeu", "legal", "e ai", "tudo bem"],
+    "listar": ["liste", "listar", "lista", "quais arquivos", "quais sao os arquivos",
+               "o que tem na pasta", "conteudo da pasta", "diretorios", "arquivos do"],
     "mostrar_grafo": ["grafo", "agentes", "quem esta trabalhando", "pipeline",
                       "mapa dos agentes", "visualizacao dos agentes"],
     "sub_agente": ["sub agente", "subagente", "sub-agente", "spawn", "delegue",
@@ -103,6 +105,7 @@ _NON_PATH_WORDS = {"grafo", "agentes", "sistema", "tudo", "agora", "hoje", "ai",
 # sinônimos flexionais: radicais que casam por prefixo (ex.: "conserte"→"consert")
 _VERB_STEMS = {
     "ler_arquivo": ["leia", "le ", "ler", "lê", "abri"],
+    "listar": ["liste", "list"],
     "executar": ["rode", "rod", "execut", "test", "compil", "instal", "build", "run"],
     "criar_arquivo": ["cri", "ger", "escrev", "salv", "implement", "mont", "nov"],
     "editar_codigo": ["corrig", "consert", "refat", "ajust", "edit", "melhor", "troca", "mud"],
@@ -170,6 +173,7 @@ def deterministic_plan(text: str) -> list[dict]:
       visual       → 'camera/foto' → camera_view | senão see_screen
       celular      → 'notifica X' → phone(notificar) | 'abre app X' → abrir_app
       mostrar_grafo→ show_graph (UI pura, sem LLM)
+      listar       → extrair pasta-alvo se houver → list_dir(pasta) | padrão '.'
       sub_agente   → nome+alvo extraídos → spawn_subagent(name, goal)
       criar/editar/planejar/conversar → sem plano fixo: exigem conteúdo/LLM;
             o Agent responde com fallback instruído (nunca falha silenciosa).
@@ -186,6 +190,7 @@ def deterministic_plan(text: str) -> list[dict]:
         "celular": lambda: _plan_phone(text),
         # intenções de UI/orquestração → ferramenta interna (não pedem arquivo nem LLM)
         "mostrar_grafo": lambda: [{"name": "show_graph", "args": {}}],
+        "listar": lambda: _plan_list(text),
         "sub_agente": lambda: [{"name": "spawn_subagent",
                                 "args": {"name": _sub_name(text), "goal": _sub_goal(text)}}],
         "criar_arquivo": lambda: [],   # precisa de conteúdo → LLM ou pedido de detalhe
@@ -202,6 +207,13 @@ def _plan_read(text: str) -> list[dict]:
         return [{"name": "ask_detail", "args": {"question":
                 "qual arquivo devo ler? (ex.: leia joe/config.py)"}}]
     return [{"name": "read_file", "args": {"path": target}}]
+
+
+def _plan_list(text: str) -> list[dict]:
+    """'liste os arquivos [da pasta X]' → list_dir(X); sem pasta → '.' (raiz atual)."""
+    m = re.search(r"(?:na|da|em|pasta)\s+([~\w][\w./-]*)", _fold(text))
+    path = m.group(1) if m else "."
+    return [{"name": "list_dir", "args": {"path": path}}]
 
 
 def _plan_phone(text: str) -> list[dict]:
