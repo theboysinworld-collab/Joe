@@ -50,11 +50,10 @@ class SpeechCapability(Capability):
         for e in ("espeak", "espeak-ng"):
             if shutil.which(e):
                 return e
-        try:
-            import pyttsx3  # noqa: F401
+        from .deps import ensure
+        if ensure("pyttsx3"):   # ausente/quebrada → Joe tenta baixar via pip
             return "pyttsx3"
-        except ImportError:
-            return ""
+        return ""
 
     def perceive(self, text: str = "", **_) -> str:
         engine = self._engine()
@@ -65,8 +64,11 @@ class SpeechCapability(Capability):
         elif engine in ("espeak", "espeak-ng"):
             subprocess.run([engine, "-v", "pt-br", text], check=False)
         else:
-            import pyttsx3
-            pyttsx3.init().say(text).runAndWait()
+            try:
+                import pyttsx3
+                pyttsx3.init().say(text).runAndWait()
+            except Exception as e:   # motor virou quebrado em runtime → não derruba o turno
+                return f"[sem motor de voz — texto para fala]: {text} (pyttsx3 falhou: {e})"
         return f"falei (via {engine}): {text[:80]}"
 
 
@@ -172,11 +174,8 @@ class ImageGenCapability(Capability):
     name = "criar_imagem"
 
     def available(self) -> bool:
-        try:
-            import PIL  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        from .deps import ensure
+        return ensure("PIL", "pillow")   # ausente/quebrada → tenta baixar na hora
 
     def perceive(self, prompt: str = "", out_path: str = "", width: int = 512, height: int = 512, **_) -> str:
         # 1) tentativa: backend externo registrado por extensão (ex.: SD local)
@@ -187,7 +186,9 @@ class ImageGenCapability(Capability):
         try:
             from PIL import Image, ImageDraw
         except ImportError:
-            return "Pillow ausente — instale `pillow` ou registre um backend via extensão."
+            return ("Pillow indisponível (não consegui baixar) — "
+                    "fallback determinístico sem imagem: descrição gerada do prompt: "
+                    f"'{prompt[:160]}' · registre um backend via extensão se quiser imagem real.")
         import hashlib
         seed = int(hashlib.md5(prompt.encode()).hexdigest(), 16)
         img = Image.new("RGB", (width, height), (20, 22, 30))

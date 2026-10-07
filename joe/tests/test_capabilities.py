@@ -28,8 +28,13 @@ class FakeProc:
 
 
 # ---------------------------------------------------------------- falar
-def test_falar_sem_motor_devolve_texto_nunca_explode(fake_which):
-    fake_which(set())                      # nenhum motor de voz
+def test_falar_sem_motor_devolve_texto_nunca_explode(fake_which, monkeypatch):
+    fake_which(set())                      # nenhum binário de voz no PATH
+    from joe import deps as _d
+    monkeypatch.setattr(_d, "_checked", {})
+    monkeypatch.setattr(_d, "_installed", {"pyttsx3"})   # sem baixar nada
+    monkeypatch.setattr(_d, "_pip_install", lambda *a, **k: False)
+    monkeypatch.setitem(__import__("sys").modules, "pyttsx3", None)  # módulo 'quebrado'
     cap = C.SpeechCapability()
     assert not cap.available()
     out = cap.perceive(text="olá mundo")

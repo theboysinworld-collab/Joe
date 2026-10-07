@@ -43,6 +43,11 @@ def _stub_run(monkeypatch, results=None, create_file=None, rc=None):
 # ---------------------------------------------------------------- falar/ouvir
 def test_speech_no_engine_fallback(monkeypatch):
     monkeypatch.setattr(cap.shutil, "which", lambda n: None)
+    from joe import deps as _d
+    monkeypatch.setattr(_d, "_checked", {})
+    monkeypatch.setattr(_d, "_installed", {"pyttsx3"})
+    monkeypatch.setattr(_d, "_pip_install", lambda *a, **k: False)
+    monkeypatch.setitem(__import__("sys").modules, "pyttsx3", None)
     c = cap.SpeechCapability()
     assert not c.available()
     out = c.perceive(text="oi")

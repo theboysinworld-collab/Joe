@@ -103,6 +103,16 @@ class HealthCheckTool(Tool):
         exts = load_all()
         lines.append(f"— Extensões ({len(exts)}) —")
         lines += [f"{'✅' if 'error' not in m else '❌'} {m['name']}" for m in exts.values()]
+        # dependências opcionais: o que falta, se dá pra baixar, e o fallback de cada uma
+        from ..deps import status as dep_status, tools_status
+        lines.append("— Dependências opcionais (pip) —")
+        fb = {"PIL": "descrição textual do prompt", "pyttsx3": "say/espeak → texto puro",
+              "numpy": "vetor puro-Python (mais lento, funciona)"}
+        for m, ok in dep_status().items():
+            lines.append(f"{'✅' if ok else '⚠️'} {m}: "
+                         + ("ok" if ok else f"ausente/quebrada → tento baixar sozinho; fallback: {fb.get(m, 'modo offline')}"))
+        miss = [b for b, ok in tools_status().items() if not ok]
+        lines.append(f"— Binários externos ausentes: {', '.join(miss) or '(nenhum)'} —")
         return ToolResult(output="\n".join(lines))
 
 
