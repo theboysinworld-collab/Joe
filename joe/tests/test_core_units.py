@@ -8,6 +8,14 @@ from joe.memory import Memory, _norm, cosine
 from joe.tools.base import FunctionTool, Tool, ToolResult, bootstrap_tools, registry
 
 
+@pytest.fixture()
+def cfg(tmp_path):
+    """Config isolado apontando para o tmp_path (não depende de env externo)."""
+    c = Config()
+    c.extra["joe_home"] = str(tmp_path)
+    return c
+
+
 # ---------------------------------------------------------------- ToolResult / registry
 def test_toolresult_textos_canonicos():
     assert ToolResult(output="x").as_text() == "x"

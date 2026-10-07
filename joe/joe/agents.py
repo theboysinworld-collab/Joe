@@ -206,13 +206,15 @@ def _plan_read(text: str) -> list[dict]:
 
 def _plan_phone(text: str) -> list[dict]:
     t = _fold(text)
-    if any(w in t for w in ("notific", "avisa", "alerta")):
-        return [{"name": "phone", "args": {"action": "notificar",
-                                           "message": text}}]
+    # ordem importa: "abrir app X no celular" é abrir_app, não notificar.
     if any(w in t for w in ("abre", "abrir", "abra")):
         app = re.search(r"(?:app|aplicativo)\s+([\w.-]+)", t)
         return [{"name": "phone", "args": {"action": "abrir_app",
                                            "app": app.group(1) if app else text}}]
+    if any(w in t for w in ("notific", "avisa", "avisar", "avise", "alerta")) or \
+            re.search(r"\bno\s+cel(ular)?\b", t):
+        return [{"name": "phone", "args": {"action": "notificar",
+                                           "message": text}}]
     return [{"name": "phone", "args": {"action": "status"}}]
 
 

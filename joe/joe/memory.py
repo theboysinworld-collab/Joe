@@ -26,7 +26,8 @@ from pathlib import Path
 from .config import DB_PATH, MEMORY_PATH, Config
 
 _STOP = set("a o e u as os um uma de do da dos das em no na nos nas para por com que "
-             "seu sua isso essa esse aqui ali hoje agora voce você mim moi me te".split())
+             "seu sua isso essa esse aqui ali hoje agora voce você mim moi me te "
+             "eu ele ela eles elas tu nos vcs".split())
 
 
 def _norm(text: str) -> list[str]:
@@ -35,10 +36,15 @@ def _norm(text: str) -> list[str]:
 
 
 def _hash_vector(text: str, dim: int = 256) -> list[float]:
-    """Embedding determinístico offline: tokens+bigramas → buckets com peso."""
+    """Embedding determinístico offline: tokens+bigramas → buckets com peso.
+
+    Usa contagem única (set) para que a similaridade seja independente do
+    tamanho do texto — um parágrafo e uma frase sobre o mesmo assunto têm
+    interseção de tokens alta, não diluída pela repetição.
+    """
     vec = [0.0] * dim
     toks = _norm(text)
-    grams = toks + [f"{a}_{b}" for a, b in zip(toks, toks[1:])]
+    grams = set(toks) | {f"{a}_{b}" for a, b in zip(toks, toks[1:])}
     for g in grams:
         h = int(hashlib.md5(g.encode()).hexdigest(), 16)
         vec[h % dim] += 1.0
@@ -177,9 +183,11 @@ class Memory:
                 hits[f"f:{text}"] = {"kind": "fato", "text": text, "tag": tag, "score": round(s, 3)}
         for path, chunk, blob in self.conn.execute("SELECT path,chunk,embedding FROM docs LIMIT 4000"):
             score = cosine(qvec, self._unvec(blob) or [])
-            if score > 0.2:
+            lex = len(qt & set(_norm(chunk))) / (len(qt) or 1)
+            s = max(score, 0.7 * score + 0.3 * lex)
+            if s > 0.2:
                 key = f"d:{path}:{chunk[:40]}"
-                hits[key] = {"kind": "doc", "text": chunk[:300], "tag": path, "score": round(score, 3)}
+                hits[key] = {"kind": "doc", "text": chunk[:300], "tag": path, "score": round(s, 3)}
         out = sorted(hits.values(), key=lambda x: -x["score"])[:k]
         return out
 

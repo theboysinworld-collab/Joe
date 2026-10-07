@@ -285,8 +285,14 @@ def benchmark(config: Config, probe: str = "Diga apenas OK") -> list[dict]:
 
 
 def apply_benchmark_choice(config: Config, results: list[dict]) -> str | None:
-    """Persiste a escolha do melhor modelo chat nos primeiros colocados."""
-    good = [r for r in results if r["ok"]]
+    """Persiste a escolha do melhor modelo chat nos primeiros colocados.
+
+    Reordena por (score desc, latência asc) para garantir que o vencedor seja o
+    modelo de maior score e, em empate, o mais rápido — não depende da ordem
+    em que o caller passou a lista.
+    """
+    good = sorted((r for r in results if r["ok"]),
+                  key=lambda r: (-r.get("score", 0), r.get("latency_s", 9e9)))
     if not good:
         return None
     best = good[0]
