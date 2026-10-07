@@ -151,9 +151,8 @@ class ShowGraphTool(Tool):
     parameters = {"type": "object", "properties": {}}
 
     def run(self) -> ToolResult:
-        from ..ui import render_graph
-        return ToolResult(output=render_graph().plain if hasattr(render_graph(), "plain")
-                          else str(render_graph()))
+        from ..ui import graph_text
+        return ToolResult(output=graph_text())
 
 
 for t in (SpawnSubagentTool(), CreateExtensionTool(), SelfUpdateTool(),

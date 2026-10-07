@@ -129,6 +129,11 @@ def render_graph(width: int = 72, opacity_pct: int = 35) -> Text:
     return out
 
 
+def graph_text(width: int = 72) -> str:
+    """Versão texto puro do grafo (para ferramentas/CLI sem rich)."""
+    return render_graph(width).plain
+
+
 def graph_panel() -> Panel:
     return Panel(render_graph(), title="☉ agentes — pensamento · criação · decisão · memória",
                  border_style="cyan", padding=(0, 1))

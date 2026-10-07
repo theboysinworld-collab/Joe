@@ -19,6 +19,7 @@ from pathlib import Path
 from .agent import Agent
 from .bus import bus
 from .config import Config
+from .agents import spawn_subagent
 from .llm import provider_registry, bootstrap, auto_select, benchmark, apply_benchmark_choice, LLMError
 from .memory import Memory
 from .tools.base import registry
@@ -222,9 +223,18 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
         from .auto import SelfAnalysis
         print(SelfAnalysis(cfg, mem).evolve_report())
     elif cmd == "/sub":
-        from .agents import spawn_subagent
-        name, _, goal = rest.partition(" ")
-        print(spawn_subagent(name or "filho", goal or rest) or "(sem tarefa)")
+        # /sub <nome> <tarefa>: se a 2ª palavra for 'para/pra', a 1ª é o nome; senão,
+        # usa a primeira palavra da frase como tarefa (menos surpresa que um nome lixo).
+        w = rest.split(maxsplit=2)
+        if len(w) >= 3 and w[1].lower() in ("para", "pra"):
+            name, goal = w[0], " ".join(w[2:])
+        elif len(w) >= 2:
+            name, goal = "filho", rest
+        else:
+            name, goal = "filho", rest or "explorar o workspace"
+        out = spawn_subagent(name, goal)
+        print(out if (out or "").strip() else f"[{name}] concluiu sem saída textual.")
+        ui.graph()   # nó do filho já aparece no grafo
     elif cmd == "/newext":
         from .extensions import create_extension_stub
         p = create_extension_stub(rest or "minha_extensao")

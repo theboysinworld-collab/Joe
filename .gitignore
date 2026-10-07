@@ -1,6 +1,22 @@
-__pycache__/node_modules/
+# Python bytecode
+__pycache__/
+*.pyc
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+*.env.*
+
+# OS generated files
+.DS_Store
+Thumbs.dbnode_modules/
 .next/
 dist/
 build/
 *.log
-node_modules/

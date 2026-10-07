@@ -242,13 +242,27 @@ def _strip_query(text: str) -> str:
     return out.strip(" ?.!") or text.strip()
 
 
+_SUB_PREFIX_STRIP = re.compile(
+    r"^(?:(?:crie|gere|use|chame|contrate|spawn)\s+)?"
+    r"(?:um|uma|o|a)?\s*(?:novo\s+|nova\s+)?"
+    r"(?:sub[-\s]?agente|agente|filho)(?:\s+[a-z][\w-]*)?\s+"
+    r"(?:para|pra)\s+",
+    re.I)
+
+
 def _sub_goal(text: str) -> str:
-    """Isola a meta real do filho (playbook: 'um agente X PARA <meta>')."""
-    m = re.search(r"\b(?:para|pra)\s+(.+)$", text, re.I | re.S)
-    goal = m.group(1).strip() if m else text
-    # remove prefixos residuais de delegação ('um filho …', 'o agente …')
-    goal = re.sub(r"^(?:um|o|a|um\s+filho|filho|agente|sub[-\s]?agente)[\w-]*\s+", "", goal, flags=re.I)
-    return goal.strip() or text
+    """Isola a meta real do filho (playbook: 'um agente X PARA <meta>').
+
+    'crie um sub-agente revisor para revisar o codigo' → 'revisar o codigo'.
+    Sem marcador 'para', mantém o texto todo (nunca devolve vazio)."""
+    m = _SUB_PREFIX_STRIP.search(text.strip())
+    if m:
+        goal = text.strip()[m.end():].strip()
+        if goal:
+            return goal
+    mm = re.search(r"\b(?:para|pra)\s+(.+)$", text, re.I | re.S)
+    goal = mm.group(1).strip() if mm else text.strip()
+    return goal or text.strip()
 
 
 def _first_path(text: str) -> str:
@@ -260,8 +274,10 @@ def _first_path(text: str) -> str:
 
 
 def _sub_name(text: str) -> str:
-    m = re.search(r"(?:sub[- ]?agente|agente)\s+([\w-]+)", _fold(text))
-    return m.group(1) if m else "filho"
+    m = re.search(r"(?:sub[- ]?agente|agente)\s+([a-z][\w-]+)", _fold(text))
+    if m and m.group(1) not in ("para", "pra", "que", "de", "o", "a", "um", "uma"):
+        return m.group(1)
+    return "filho"
 
 
 def _first_cmd(text: str) -> str:

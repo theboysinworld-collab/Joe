@@ -218,6 +218,9 @@ def auto_select(config: Config) -> str | None:
 # ---------------------------------------------------------------- fachadas estáveis
 def chat_completion(messages: list[dict], tools: list[dict] | None, config: Config) -> dict:
     p = provider_registry.active()
+    if p is not None and not p.available():
+        provider_registry._active_id = None      # auto-cura: seleção morta é descartada
+        p = None
     if p is None:
         bootstrap(config)
         if auto_select(config) is None:
