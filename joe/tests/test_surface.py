@@ -128,6 +128,10 @@ def test_live_graph_text_fallback_loops(tmp_path, monkeypatch):
     """Fallback sem rich.live: deve redesenhar múltiplos frames e parar só em 'q'."""
     import joe.ui as ui
 
+    # grafo isolado: limpa estado global (outros testes podem ter populado STATE)
+    ui.STATE.nodes.clear(); ui.STATE.edges.clear(); ui.STATE.suggestions.clear()
+    ui.STATE.touch("usuário", "teste")
+
     orig_panel = ui.graph_panel
 
     def _boom():

@@ -95,7 +95,11 @@ INTENT_PROFILES: dict[str, list[str]] = {
     "conversar": ["oi", "ola", "bom dia", "boa noite", "quem e voce", "obrigado",
                   "valeu", "legal", "e ai", "tudo bem"],
     "listar": ["liste", "listar", "lista de", "lista os", "quais arquivos", "quais sao os arquivos",
-               "o que tem na pasta", "conteudo da pasta", "diretorios", "arquivos do"],
+               "o que tem na pasta", "conteudo da pasta", "diretorios", "arquivos do",
+               # variantes coloquiais (gap "me mostre os arquivos" ≠ ler arquivo único)
+               "os arquivos", "as pastas", "os diretorios", "os aquivos", "arquivos da pasta",
+               "o que tem aqui", "o que tem na", "que arquivos", "mostre os arquivos",
+               "mostra os arquivos", "me mostre os arquivos", "me mostra os arquivos"],
     "mostrar_grafo": ["grafo", "agentes", "quem esta trabalhando", "pipeline",
                       "mapa dos agentes", "visualizacao dos agentes"],
     "sub_agente": ["sub agente", "subagente", "sub-agente", "spawn", "delegue",

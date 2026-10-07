@@ -34,7 +34,13 @@ class GraphState:
     suggestions: list[str] = field(default_factory=list)     # proatividade (cooldown/limite)
 
     def touch(self, nid: str, note: str = "") -> None:
-        self.nodes[nid] = {"label": nid, "note": note[:60], "ts": time.time()}
+        # nota vazia não apaga a anterior (decisões do executor chegam via 'note=')
+        if note:
+            self.nodes[nid] = {"label": nid, "note": note[:60], "ts": time.time()}
+        elif nid not in self.nodes:
+            self.nodes[nid] = {"label": nid, "note": "", "ts": time.time()}
+        else:
+            self.nodes[nid]["ts"] = time.time()
 
     def add_suggestion(self, text: str) -> None:
         """Enfileira sugestão proativa; deduplica e limita a 5 recentes."""
@@ -61,7 +67,10 @@ def _listener(ev: dict) -> None:
     if t == "agent.step":
         role = p.get("role", "?")
         nid = _node_id(role, p.get("name", "Joe"))
-        STATE.touch(nid, f"{role}: {p.get('intent') or p.get('verdict') or p.get('mode') or ''}")
+        # nota do grafo: decisão/resultado real (note), não só o rótulo do papel —
+        # assim executor/revisor/conclusão mostram "o que pensaram" no grafo.
+        detail = p.get("note") or p.get("intent") or p.get("verdict") or p.get("mode") or ""
+        STATE.touch(nid, f"{role}: {detail}")
         # aresta real do pipeline: papel anterior → papel atual (nunca crasha)
         seq = [_ROLE_MAP.get(r, r) for r in _PIPELINE_ROLES]
         cur = _ROLE_MAP.get(role, role)

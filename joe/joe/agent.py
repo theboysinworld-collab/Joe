@@ -228,6 +228,8 @@ class Agent:
             bus.emit("agent.plan_step", agent=self.agent_id, tool=step["name"],
                      args=_short(step["args"]))
             r = registry.execute(step["name"], step["args"])
+            # executor reporta a decisão/resultado ao grafo (o que criou/executou)
+            self._step("executor", note=f"{step['name']} → {r.as_text()[:60]}")
             outs.append(f"{step['name']}: {r.as_text()[:600]}")
         return "Executei seu pedido sem LLM (planner determinístico):\n\n" + "\n\n".join(outs)
 

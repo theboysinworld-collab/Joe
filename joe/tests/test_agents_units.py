@@ -168,3 +168,26 @@ def test_escrita_offline_end_to_end_escreve_arquivo(tmp_path, monkeypatch):
     assert wrote.exists(), f"arquivo não criado; resposta: {resp[:200]}"
     assert "oi" in wrote.read_text().lower()
 
+
+
+def test_classify_listar_variantes_coloquiais():
+    """Gap de inteligência corrigido: 'me mostre os arquivos' é listar, não ler."""
+    for frase in ("me mostre os arquivos", "mostre os arquivos da pasta",
+                  "o que tem na pasta raiz"):
+        intent, _ = classify_intent(frase)
+        assert intent == "listar", f"{frase!r} -> {intent}"
+    # regressão: leitura de arquivo único continua sendo ler_arquivo
+    assert classify_intent("leia joe/config.py")[0] == "ler_arquivo"
+    assert classify_intent("me mostre o grafo")[0] == "mostrar_grafo"
+
+
+def test_executor_decisao_aparece_no_grafo():
+    """Comunicação E2E: decisão do executor vira nota legível no nó do grafo."""
+    from joe.ui import STATE
+    from joe.agent import Agent
+    STATE.nodes.clear()
+    ag = Agent()
+    reply = ag.chat("me mostre os arquivos", echo=lambda s: None)
+    assert "list_dir" in reply.lower()
+    assert "list_dir" in STATE.nodes.get("executor", {}).get("note", ""), \
+        f"grafo sem decisão do executor: {dict(STATE.nodes)}"
