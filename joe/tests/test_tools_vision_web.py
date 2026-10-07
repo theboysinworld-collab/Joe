@@ -8,6 +8,7 @@ import json
 
 from joe.tools import vision as vision_mod
 from joe.tools import web as web_mod
+from joe.tools.base import registry
 from joe.bus import EventBus
 
 
@@ -74,3 +75,60 @@ def test_search_web_sem_rede_nao_quebra(monkeypatch):
     monkeypatch.setattr(web_mod, "_caps", lambda: type("R", (), {"get": staticmethod(lambda n: FakeCap())})())
     res = web_mod.SearchWebTool().run("python 3.13 novidades")
     assert not res.ok and "sem acesso" in res.output
+
+
+# ---- parte vision-2: caminhos com modelo de visão fake (mock do provider) ----
+
+def test_analyze_image_usa_provider_multimodal_fake(tmp_path, monkeypatch):
+    import joe.llm as llm_mod
+    img = tmp_path / "tela.png"
+    img.write_bytes(b"\x89PNG fake")
+
+    class FakeVisionProvider:
+        id = "ollama"
+        def list_models(self): return ["llava:13b"]
+        def chat(self, msg, tools): return {"content": "vejo um terminal aberto"}
+
+    monkeypatch.setattr(llm_mod.provider_registry, "active", lambda: FakeVisionProvider())
+    r = registry.execute("analyze_image", {"path": str(img)})
+    assert r.ok and "terminal aberto" in r.output
+
+
+def test_analyze_image_sem_provedor_cai_para_ocr_indisponivel(tmp_path):
+    # sem tesseract/pytesseract no ambiente → cascata termina em aviso claro, nunca exceção
+    img = tmp_path / "x.png"; img.write_bytes(b"x")
+    r = registry.execute("analyze_image", {"path": str(img)})
+    assert not r.ok  # aviso explicando OCR/visão indisponíveis
+    assert "OCR" in r.output or "visão" in r.output or "llava" in r.output
+
+
+def test_vision_model_helper_true_false():
+    from joe.tools.vision import _vision_model
+    class P:
+        def __init__(self, m): self.m = m
+        def list_models(self): return self.m
+    assert _vision_model(P(["llava:7b"])) is True
+    assert _vision_model(P(["qwen2.5-coder:1.5b"])) is False
+    class Boom:
+        def list_models(self): raise RuntimeError("sem conexão")
+    assert _vision_model(Boom()) is False  # nunca propaga exceção
+
+
+def test_ocr_tesseract_presente_monkeypatched(tmp_path, monkeypatch):
+    import joe.tools.vision as V
+    img = tmp_path / "a.png"; img.write_bytes(b"x")
+    monkeypatch.setattr(V.shutil, "which", lambda n: "/usr/bin/tesseract")
+    class R: returncode = 0; stdout = "texto extraído\n"
+    monkeypatch.setattr(V.subprocess, "run", lambda *a, **k: R())
+    r = registry.execute("ocr_image", {"path": str(img)})
+    assert r.ok and r.output == "texto extraído"
+
+
+def test_ocr_tesseract_falha_e_pytesseract_indisponivel(tmp_path, monkeypatch):
+    import joe.tools.vision as V
+    img = tmp_path / "a.png"; img.write_bytes(b"x")
+    monkeypatch.setattr(V.shutil, "which", lambda n: None)  # força caminho pytesseract
+    import sys
+    sys.modules.pop("pytesseract", None)
+    r = registry.execute("ocr_image", {"path": str(img)})
+    assert not r.ok and "tesseract" in r.output.lower()
