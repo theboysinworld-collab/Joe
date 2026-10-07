@@ -201,12 +201,12 @@ class UI:
 
 # ---------------------------------------------------------------- loop ao vivo
 def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float = 0.0,
-               input_fn=None, stop_keys: tuple[str, ...] = ("q", "enter", "")) -> int:
+               input_fn=None, stop_keys: tuple[str, ...] = ("q",)) -> int:
     """Redesenha o grafo do centro da interface continuamente (vibe n8n ao vivo).
 
     - assina o EventBus (via STATE já atualizado pelo listener módulo) e repinta;
-    - sai quando o usuário digita uma tecla de parada ou atinge ``max_secs``
-      (0 = sem limite);
+    - sai quando o usuário digita uma tecla de parada ("q") ou atinge ``max_secs``
+      (0 = sem limite); Enter/linha em branco apenas repintam o frame;
     - nunca crasha por terminal pequeno / ausência de input: cai em modo texto.
 
     Retorna quantos frames foram desenhados (útil para testes).
@@ -223,6 +223,30 @@ def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float
 
     def _expired() -> bool:
         return bool(max_secs) and (time.time() - t0 >= max_secs)
+
+    def _loop_text() -> int:
+        """Fallback determinístico (sem rich.live): redesenha em modo texto."""
+        nonlocal_frames = 0
+        clear = getattr(con, "clear", None)
+        while True:
+            nonlocal_frames += 1
+            if callable(clear):
+                try:
+                    clear()
+                except Exception:
+                    pass
+            con.print(graph_text())
+            if _expired():
+                break
+            if input_fn is not None:
+                key = input_fn()
+                if key in stop_keys or _expired():
+                    break
+            else:
+                time.sleep(1.0 / fps)
+                if _expired():
+                    break
+        return nonlocal_frames
 
     try:
         from rich.live import Live
@@ -243,7 +267,6 @@ def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float
                     if _expired():
                         break
     except Exception:
-        # ambiente sem TTY/rich.live → fallback texto puro (uma passada)
-        con.print(graph_text())
-        frames = max(frames, 1)
+        # ambiente sem TTY/rich.live → fallback texto puro com loop ao vivo
+        frames = max(frames, _loop_text())
     return frames
