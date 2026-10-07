@@ -131,6 +131,19 @@ class PredictNeedsTool(Tool):
                           or "(sem padrões suficientes ainda)")
 
 
+class ShowGraphTool(Tool):
+    """Intenção de UI: 'me mostre o grafo' → renderiza o grafo de agentes (sem LLM)."""
+    name = "show_graph"
+    description = ("Mostra o grafo atual dos agentes em pipeline (intenção→planejador→"
+                   "executor→revisor→conclusão) com pensamentos, ferramentas e memória.")
+    parameters = {"type": "object", "properties": {}}
+
+    def run(self) -> ToolResult:
+        from ..ui import render_graph
+        return ToolResult(output=render_graph().plain if hasattr(render_graph(), "plain")
+                          else str(render_graph()))
+
+
 for t in (SpawnSubagentTool(), CreateExtensionTool(), SelfUpdateTool(),
-          HealthCheckTool(), LearnTool(), PredictNeedsTool()):
+          HealthCheckTool(), LearnTool(), PredictNeedsTool(), ShowGraphTool()):
     registry.register(t)

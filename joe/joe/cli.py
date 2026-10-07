@@ -137,6 +137,7 @@ def repl() -> int:
             if not _slash(line, agent, cfg, ui, mem):
                 break
             continue
+        # linha natural: passa pelo PIPELINE DE AGENTES (intenção→planejador→executor→revisor→conclusão)
         reply = agent.chat(line, echo=ui.tool_line)
         ui.answer(reply)
         ui.graph()  # o grafo se atualiza com o que aconteceu de verdade

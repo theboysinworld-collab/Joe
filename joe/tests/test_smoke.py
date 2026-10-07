@@ -177,3 +177,53 @@ def test_cli_ask_offline_no_crash(cfg, tmp_path, monkeypatch, capsys):
     rc = cli.main(["ask", "lembre que meu nome é Ana"])
     out = capsys.readouterr().out
     assert rc == 0 and out.strip()
+
+
+# ---------------------------------------------------------------- lacunas corrigidas (sessão atual)
+@pytest.mark.parametrize("texto,esperada", [
+    ("me mostre o grafo", "mostrar_grafo"),
+    ("mostre os agentes em ação", "mostrar_grafo"),
+    ("crie um sub agente pesquisador para achar bugs", "sub_agente"),
+    ("delegue essa revisão para um filho", "sub_agente"),
+])
+def test_intencoes_de_ui_e_orquestracao(texto, esperada):
+    intent, score = classify_intent(texto)
+    assert intent == esperada and score >= 2.6
+
+
+def test_planner_offline_usa_ferramentas_internas():
+    plan = deterministic_plan("me mostre o grafo")
+    assert plan and plan[0]["name"] == "show_graph"
+    plan = deterministic_plan("crie um sub agente escoteiro para vigiar logs")
+    assert plan and plan[0]["name"] == "spawn_subagent"
+    assert plan[0]["args"]["name"] == "escoteiro"
+
+
+def test_first_path_nunca_retorna_ponto_sozinho():
+    from joe.agents import _first_path
+    assert _first_path("leia o arquivo config.py") == "config.py"
+    r = _first_path("leia o código fonte")
+    assert r != "." and "especifique" in r
+
+
+def test_show_graph_tool_registrada_e_executa(cfg):
+    from joe.tools.base import registry, bootstrap_tools
+    bootstrap_tools()
+    assert registry.get("show_graph") is not None
+    res = registry.execute("show_graph", {})
+    assert res.ok and len(res.output) > 10
+
+
+def test_repl_rota_linha_natural_pelo_pipeline(monkeypatch, cfg):
+    """Regressão: '/sub pesquisador...' em linguagem natural NÃO pode cair em conversar."""
+    seen = []
+    monkeypatch.setattr(cli.provider_registry, "active", lambda: None)
+    agent = Agent(cfg, Memory(config=cfg))
+    orig = agent._run_offline_plan
+    def spy(text, intent, echo):
+        seen.append(intent)
+        return orig(text, intent, echo)
+    monkeypatch.setattr(agent, "_run_offline_plan", spy)
+    out = agent.chat("crie um sub agente revisor para checar erros")
+    assert seen == ["sub_agente"]
+    assert "spawn_subagent" in out or "revisor" in out

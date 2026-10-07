@@ -89,11 +89,20 @@ INTENT_PROFILES: dict[str, list[str]] = {
                 "abre o app", "liga para", "instagram", "telegram", "aplicativo", "app"],
     "conversar": ["oi", "ola", "bom dia", "boa noite", "quem e voce", "obrigado",
                   "valeu", "legal", "e ai", "tudo bem"],
+    "mostrar_grafo": ["grafo", "agentes", "quem esta trabalhando", "pipeline",
+                      "mapa dos agentes", "visualizacao dos agentes"],
+    "sub_agente": ["sub agente", "subagente", "sub-agente", "spawn", "delegue",
+                   "delegate", "contrate um agente", "crie um agente", "novo agente",
+                   "novo sub", "use um agente para", "chame um agente"],
 }
+
+# palavras que NUNCA devem ser tratadas como caminho de arquivo pelo planner
+_NON_PATH_WORDS = {"grafo", "agentes", "sistema", "tudo", "agora", "hoje", "ai", "voce",
+                   "memoria", "historico", "pipeline", "extensoes", "ferramentas"}
 
 # sinônimos flexionais: radicais que casam por prefixo (ex.: "conserte"→"consert")
 _VERB_STEMS = {
-    "ler_arquivo": ["leia", "le ", "ler", "lê", "mostre", "mostra", "abri", "mostr"],
+    "ler_arquivo": ["leia", "le ", "ler", "lê", "abri"],
     "executar": ["rode", "rod", "execut", "test", "compil", "instal", "build", "run"],
     "criar_arquivo": ["cri", "ger", "escrev", "salv", "implement", "mont", "nov"],
     "editar_codigo": ["corrig", "consert", "refat", "ajust", "edit", "melhor", "troca", "mud"],
@@ -110,9 +119,23 @@ def _fold(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s.lower()) if unicodedata.category(c) != "Mn")
 
 
+# frases de UI/meta (não são leitura de arquivo nem conversa vazia)
+_META_PATTERNS = [
+    ("mostrar_grafo", ["grafo", "os agentes", "quem esta trabalhando", "pipeline"]),
+    ("sub_agente",  ["sub agente", "subagente", "sub-agente", "delegue", "delegate",
+                     "crie um agente", "novo agente", "chame um agente", "contrate"]),
+]
+
+
 def classify_intent(text: str) -> tuple[str, float]:
     """Score semântico-por-perfil (perfis + radicos verbais): não exige frase exata."""
     t = _fold(text) + " "
+    # 1) meta-padrões têm prioridade (ex.: "me mostre o grafo" ≠ ler arquivo)
+    for intent, pats in _META_PATTERNS:
+        for p in pats:
+            if _fold(p) in t:
+                return intent, 5.0
+    # 2) pontuação por perfis + radicais
     best, best_score = "conversar", 0.0
     for intent, keys in INTENT_PROFILES.items():
         score, matched = 0.0, 0
@@ -145,6 +168,10 @@ def deterministic_plan(text: str) -> list[dict]:
         "buscar_web": lambda: [{"name": "search_web", "args": {"query": text}}],
         "visual": lambda: [{"name": "see_screen", "args": {}}],
         "celular": lambda: [{"name": "phone", "args": {"action": "status"}}],
+        # intenções de UI/orquestração → ferramenta interna (não pedem arquivo nem LLM)
+        "mostrar_grafo": lambda: [{"name": "show_graph", "args": {}}],
+        "sub_agente": lambda: [{"name": "spawn_subagent",
+                                "args": {"name": _sub_name(text), "goal": text}}],
         "criar_arquivo": lambda: [],   # precisa de conteúdo → LLM ou pedido de detalhe
         "editar_codigo": lambda: [],
         "planejar": lambda: [],
@@ -154,8 +181,16 @@ def deterministic_plan(text: str) -> list[dict]:
 
 
 def _first_path(text: str) -> str:
-    m = re.search(r"[\w./-]+\.[\w]{1,8}", text)
-    return m.group(0) if m else "."
+    """Extrai caminho/arg do texto; nunca devolve '.' — sem alvo, pede detalhe."""
+    m = re.search(r"[~\w][\w./-]*\.[\w]{1,8}|(?<![\w./-])[\w][\w./-]*(?:/[\w][\w./-]*)+", text)
+    if m and _fold(m.group(0)) not in _NON_PATH_WORDS:
+        return m.group(0)
+    return "(no arquivo indicado — especifique o caminho)"
+
+
+def _sub_name(text: str) -> str:
+    m = re.search(r"(?:sub[- ]?agente|agente)\s+([\w-]+)", _fold(text))
+    return m.group(1) if m else "filho"
 
 
 def _first_cmd(text: str) -> str:
@@ -191,8 +226,24 @@ def spawn_subagent(name: str, goal: str, agent_factory=None, parent: str = "joe"
 
 
 def _default_factory(goal: str, sa: SubAgent):
+    """Filho SEM LLM usa o planner determinístico diretamente (sem Agent completo).
+
+    Motivo: Agent._run_offline_plan executaria esta mesma ferramenta para a
+    intenção `sub_agente`, gerando recursão pai→filho→pai… O filho aqui herda
+    o registry de tools e emite seus eventos no bus (aparece no grafo), mas
+    roda um mini-loop próprio com orçamento limitado.
+    """
     def run():
-        from .agent import Agent  # late import
-        child = Agent(subagent=sa)
-        return child.chat(goal)
+        from .tools.base import registry          # late import (evita ciclo)
+        steps = [s for s in deterministic_plan(goal) if s["name"] != "spawn_subagent"]
+        if not steps:
+            return f"[{sa.name}] tarefa entendida como '{classify_intent(goal)[0]}', sem ação direta offline."
+        outs = []
+        bus.emit("agent.thought", id=sa.id, thought=f"planejei {len(steps)} passo(s): "
+                 + ", ".join(s["name"] for s in steps))
+        for st in steps[:4]:                      # orçamento do filho
+            r = registry.execute(st["name"], st["args"])
+            bus.emit("agent.tool", id=sa.id, tool=st["name"], ok=r.ok)
+            outs.append(f"{st['name']}: {r.as_text()[:400]}")
+        return "\n".join(outs)
     return run
