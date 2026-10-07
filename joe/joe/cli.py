@@ -157,9 +157,9 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
     if cmd == "/help":
         print(HELP)
     elif cmd == "/graph" and rest.strip().lower() in ("live", "ao vivo", "vivo"):
-        # loop ao vivo: redesenha o grafo continuamente até o usuário teclar q/enter
+        # loop ao vivo: redesenha o grafo continuamente até o usuário teclar q
         from .ui import live_graph
-        ui.plain("grafo ao vivo — tecle q ou enter para sair")
+        ui.plain("grafo ao vivo — tecle q para sair (enter apenas repinta)")
         frames = live_graph(console=ui.console)
         ui.plain(f"(loop encerrado após {frames} frames)")
     elif cmd == "/graph":
