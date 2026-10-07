@@ -144,7 +144,8 @@ class Agent:
         return reply
 
     # ------------------------------------------------------------ loop com LLM
-    def _run_tool_loop(self, echo) -> str:
+    def _run_tool_loop(self, echo=None) -> str:
+        echo = echo or (lambda s: None)
         tools = registry.schemas()
         budget = self.config.max_tool_iterations // 2 if self.subagent else self.config.max_tool_iterations
         try:

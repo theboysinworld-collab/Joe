@@ -141,7 +141,9 @@ def test_tool_loop_argumentsos_invalidos_e_memoria_evento(tmp_path, monkeypatch)
     ag, _ = make_agent(tmp_path)
     seen = []
     from joe import bus as BUS
-    stop = BUS.bus.subscribe("agent.memory", lambda e: seen.append(e))
+    listener = lambda e: seen.append(e)
+    BUS.bus.subscribe("agent.memory", listener)
+    stop = lambda: BUS.bus.unsubscribe(listener)
     turns = [
         {"role": "assistant", "content": "vou lembrar", "tool_calls": [
             {"id": "m1", "type": "function", "function": {
