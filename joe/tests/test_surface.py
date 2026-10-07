@@ -77,3 +77,48 @@ def test_auto_expansao_usa_ferramenta_de_extensao_sem_editar_nucleo(tmp_path):
     finally:
         registry._tools.pop("dançar", None)
         ag.memory.close()
+
+
+# ---------------------------------------------------------------- loop ao vivo (TUI grafo)
+def test_live_graph_stops_on_key():
+    """live_graph para quando input_fn devolve tecla de parada; desenha ≥1 frame."""
+    from joe.ui import live_graph
+    calls = {"n": 0}
+
+    def inp():
+        calls["n"] += 1
+        return "q" if calls["n"] >= 2 else ""   # 1ª leitura: segue; 2ª: sai
+
+    frames = live_graph(max_secs=5, input_fn=inp)
+    assert frames >= 2
+    assert calls["n"] == 2
+
+
+def test_live_graph_stops_on_timeout():
+    from joe.ui import live_graph
+    frames = live_graph(max_secs=0.2, input_fn=lambda: " ")  # espaço não é tecla de parada
+    assert frames >= 1
+
+
+def test_cli_graph_live_command(monkeypatch):
+    """'/graph live' no REPL usa o loop ao vivo e termina sem crashar."""
+    import io as _io
+    from rich.console import Console
+    import joe.cli as cli
+    import joe.ui as ui_mod
+
+    # live_graph determinístico: 2 frames e sai (não depende de TTY)
+    monkeypatch.setattr(ui_mod, "live_graph", lambda console=None, **kw: 2)
+    # mas o cli importa dentro da função → patch no módulo de origem já basta
+    captured = []
+    fake_in = iter(["/graph live"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(fake_in))
+
+    agent = cli.Agent.__new__(cli.Agent)  # não usado pelo ramo /graph
+    cfg = cli.load_config() if hasattr(cli, "load_config") else None
+    ui = cli.UI()
+    ui.console = Console(file=_io.StringIO(), force_terminal=False, width=80)
+    ok = cli._slash("/graph live", agent, cfg, ui, None)
+    assert ok is True
+    out = ui.console.file.getvalue()
+    assert "grafo ao vivo" in out and "loop encerrado após 2 frames" in out

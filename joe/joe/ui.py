@@ -197,3 +197,53 @@ class UI:
 
     def plain(self, s: str) -> None:
         self.console.print(s)
+
+
+# ---------------------------------------------------------------- loop ao vivo
+def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float = 0.0,
+               input_fn=None, stop_keys: tuple[str, ...] = ("q", "enter", "")) -> int:
+    """Redesenha o grafo do centro da interface continuamente (vibe n8n ao vivo).
+
+    - assina o EventBus (via STATE já atualizado pelo listener módulo) e repinta;
+    - sai quando o usuário digita uma tecla de parada ou atinge ``max_secs``
+      (0 = sem limite);
+    - nunca crasha por terminal pequeno / ausência de input: cai em modo texto.
+
+    Retorna quantos frames foram desenhados (útil para testes).
+    """
+    con = console or Console()
+    if input_fn is None:
+        try:
+            import sys as _sys
+            input_fn = (lambda: _sys.stdin.readline().rstrip("\n")) if not _sys.stdin.isatty() else None
+        except Exception:
+            input_fn = None
+    frames = 0
+    t0 = time.time()
+
+    def _expired() -> bool:
+        return bool(max_secs) and (time.time() - t0 >= max_secs)
+
+    try:
+        from rich.live import Live
+        with Live(graph_panel(), console=con, refresh_per_second=fps,
+                  transient=False, auto_refresh=True) as lv:
+            while True:
+                frames += 1
+                # repinta a partir do estado global (listeners alimentam STATE)
+                lv.update(graph_panel())
+                if _expired():
+                    break
+                if input_fn is not None:
+                    key = input_fn()
+                    if key in stop_keys or _expired():
+                        break
+                else:
+                    time.sleep(1.0 / fps)
+                    if _expired():
+                        break
+    except Exception:
+        # ambiente sem TTY/rich.live → fallback texto puro (uma passada)
+        con.print(graph_text())
+        frames = max(frames, 1)
+    return frames
