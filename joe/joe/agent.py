@@ -23,7 +23,7 @@ from pathlib import Path
 
 from .config import Config, HISTORY_PATH, AUDIT_LOG
 from .llm import LLMError, chat_completion, provider_registry, bootstrap, auto_select
-from .memory import Memory
+from .memory import Memory, _norm
 from .tools.base import registry, bootstrap_tools
 from .tools.shell import ShellTool
 bootstrap_tools()  # garante que todas as ferramentas embutidas (incl. agent_tools)
@@ -96,11 +96,19 @@ class Agent:
             pass
 
     # ------------------------------------------------------------ pipeline
-    def _step(self, role: str, **data) -> None:
-        bus.emit("agent.step", agent=self.agent_id, name=self.agent_name, role=role, **data)
+    def _echo(self, s: str) -> None:
+        getattr(self, "_echo_fn", lambda _: None)(s)
+
+    def _step(self, role: str, note: str = "", **data) -> None:
+        # nota legível também no stdout (eco do turno), não só no grafo/bus —
+        # assim o usuário vê "quem pensou/decidiu" sem abrir /graph.
+        if note:
+            self._echo(f"· [{role}] {note}")
+        bus.emit("agent.step", agent=self.agent_id, name=self.agent_name, role=role, note=note, **data)
 
     def chat(self, user_text: str, echo=None) -> str:
         echo = echo or (lambda s: None)
+        self._echo_fn = echo          # disponível p/ _step ecoar decisões no turno
         from . import llm as _llm  # indireção p/ monkeypatch em testes
 
         # 1) INTENÇÃO
@@ -185,13 +193,27 @@ class Agent:
         plan = deterministic_plan(user_text)
         if not plan:
             # auto-expansão: se a intenção não tem playbook mas existe ferramenta
-            # com esse nome registrado (ex.: núcleo criado por extensão), usa-a.
-            # Assim o sistema ganha capacidades novas SEM editar o núcleo.
+            # cujo NOME aparece no texto do usuário (ex.: 'piada' → piada_hello,
+            # criada por extensão drop-in), usa-a. Assim o sistema ganha
+            # capacidades novas SEM editar o núcleo — no mesmo turno da criação.
             from .tools.base import registry as _reg
-            guess = intent.replace("-", "_")
-            if _reg.get(guess):
-                plan = [{"name": guess, "args": {"text": user_text}}]
-                self._step("executor", note=f"auto-expansão → {guess}")
+            norm = _norm(user_text)   # lista de tokens normalizados (sem acentos)
+            guesses = []
+            for cand in (intent.replace("-", "_"), *norm):
+                if len(cand) < 3 or cand in ("conta", "uma", "meu", "com"):
+                    continue
+                guesses += [t for t in _reg.names()
+                            if (t == cand or t.startswith(cand + "_")) and t not in guesses]
+            if guesses:
+                # casa os args com a assinatura real da ferramenta (stub usa 'who')
+                import inspect as _insp
+                try:
+                    params = set(_insp.signature(_reg.get(guesses[0]).fn).parameters)
+                except Exception:
+                    params = {"text"}
+                arg_name = "text" if "text" in params else next(iter(params), "text")
+                plan = [{"name": guesses[0], "args": {arg_name: user_text}}]
+                self._step("executor", note=f"auto-expansão → {guesses[0]}")
         if not plan:
             return (
                 f"Entendi sua intenção como **{intent}** (score da análise semântica).\n"

@@ -116,3 +116,19 @@ def test_main_subcomandos_cli(fake_stdin, tmp_path, monkeypatch):
     out = buf.getvalue().lower()
     assert "qwen" in out or "modelo" in out   # config model respondeu
     assert "memorizado" in out or "fato" in out  # memory add respondeu
+
+
+def test_repl_extensao_executada_de_verdade_no_mesmo_turno(fake_stdin, tmp_path, monkeypatch):
+    """Requisito crítico: a ferramenta criada por extensão é EXECUTADA (não só citada)."""
+    monkeypatch.setenv("JOE_HOME", str(tmp_path / "joe_home3"))
+    buf = fake_stdin([
+        "/newext piada",
+        "conta uma piada",
+        "/exit",
+    ])
+    rc = cli.repl()
+    out = buf.getvalue()
+    assert rc == 0
+    # execução REAL da ferramenta da extensão no mesmo turno:
+    assert "olá, conta uma piada! (extensão piada)" in out
+    assert "auto-expansão" in out          # executor marcou a decisão no grafo
