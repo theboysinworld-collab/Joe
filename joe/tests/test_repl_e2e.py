@@ -72,3 +72,27 @@ def test_repl_newext_e_uso_no_mesmo_turno(fake_stdin, tmp_path, monkeypatch):
     assert rc == 0
     out = buf.getvalue().lower()
     assert "piada" in out  # criação confirmada na saída
+
+
+def test_repl_comandos_de_configuracao(fake_stdin, tmp_path, monkeypatch):
+    """Ramos de configuração da UI: chave OpenRouter, modelo, provedor, esquecimento."""
+    monkeypatch.setenv("JOE_HOME", str(tmp_path / "joe_home_cfg"))
+    buf = fake_stdin([
+        "/config openrouter sk-or-teste-123",   # requisito: chave via interface
+        "/model qwen2.5-coder:1.5b",            # modelo preferido
+        "/provider ollama",                     # troca limpa (um por vez)
+        "/remember gosto de café",
+        "/forget café",                         # remove o fato criado acima
+        "/rag café",                            # índice vazio após forget → gracioso
+        "/see camera",                          # rota câmera (fallback sem hardware)
+        "/phone notificar oi",                  # capacidade celular (fallback)
+        "/image um gato robô",                  # geração de imagem (fallback)
+        "/xyzdesconhecido",                     # rota de comando inválido
+        "/exit",
+    ])
+    rc = cli.repl()
+    out = buf.getvalue().lower()
+    assert rc == 0
+    assert "openrouter" in out          # confirmação da chave salva
+    assert "qwen" in out or "modelo" in out
+    assert "desconhecido" in out        # tratamento gracioso de comando inválido
