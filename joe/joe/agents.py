@@ -419,7 +419,11 @@ def _sub_goal(text: str) -> str:
 
 def _first_path(text: str) -> str:
     """Extrai caminho/arg do texto; nunca devolve '.' — sem alvo, pede detalhe."""
-    m = re.search(r"[~\w][\w./-]*\.[\w]{1,8}|(?<![\w./-])[\w][\w./-]*(?:/[\w][\w./-]*)+", text)
+    # 1) caminho absoluto ou home (mais forte: '/tmp/x.txt', '~/docs/a.md')
+    m = re.search(r"(?<!\w)(/[^\s]+|~/[^\s]+)", text)
+    if not m:
+        # 2) token com extensão ('config.py') ou multi-segmento ('joe/tools')
+        m = re.search(r"[~\w][\w./-]*\.[\w]{1,8}|(?<![\w./-])[\w][\w./-]*(?:/[\w][\w./-]*)+", text)
     if m and _fold(m.group(0)) not in _NON_PATH_WORDS:
         return m.group(0)
     return "(no arquivo indicado — especifique o caminho)"

@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 from .base import Tool, ToolResult, registry
 
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"}
+
+
+def _atomic_write(p: Path, content: str) -> None:
+    """Escrita atômica: tmp + os.replace (nunca deixa arquivo corrompido se cair no meio)."""
+    tmp = p.with_suffix(p.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, p)
 
 
 class ReadFileTool(Tool):
@@ -36,7 +44,7 @@ class WriteFileTool(Tool):
     def run(self, path: str, content: str) -> ToolResult:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        _atomic_write(p, content)
         return ToolResult(output=f"escrito {p} ({len(content)} chars)")
 
 
@@ -58,7 +66,7 @@ class EditFileTool(Tool):
             return ToolResult(ok=False, output="texto old não encontrado (leia o arquivo antes)")
         if n > 1 and not replace_all:
             return ToolResult(ok=False, output=f"old aparece {n}x — refine ou use replace_all")
-        p.write_text(text.replace(old, new), encoding="utf-8")
+        _atomic_write(p, text.replace(old, new))
         return ToolResult(output=f"editado {path} ({n} substituições)")
 
 

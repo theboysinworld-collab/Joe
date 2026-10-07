@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import abc
 import json
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -50,12 +51,45 @@ class Provider(abc.ABC):
         return None  # embeddings são opcionais; memória tem fallback vetorial próprio
 
 
-def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: int = 120) -> dict:
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: int | None = None) -> dict:
+    """POST com retry/backoff para falhas transitórias de rede (5xx/URLError).
+
+    Estratégia: até 3 tentativas; espera 0.5s, 1s (backoff exponencial simples).
+    HTTPError 4xx não é retryável (erro do pedido em si).
+    Timeout por tentativa: config.llm_timeout via `set_llm_timeout` (padrão 300s);
+    timeouts são retryáveis (modelo local pode estar carregando na primeira chamada)."""
+    last_err: Exception | None = None
+    to = timeout if timeout is not None else _LLM_TIMEOUT[0]
+    for attempt in range(3):
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=to) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            # 4xx = erro real do pedido (não adianta repetir); 5xx = servidor ocupado/caiu → retry
+            if 400 <= e.code < 500:
+                raise
+            last_err = e
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+            # inclui "timed out" — modelo lento ainda está trabalhando; vale tentar de novo
+            last_err = e
+        time.sleep(0.5 * (2 ** attempt))
+    assert last_err is not None
+    raise last_err
+
+
+# timeout efetivo das chamadas de LLM (mutável via set_llm_timeout p/ injetar config)
+_LLM_TIMEOUT = [300]
+
+
+def set_llm_timeout(seconds: int) -> None:
+    """Define o timeout por tentativa das chamadas ao LLM (chat/embed)."""
+    try:
+        _LLM_TIMEOUT[0] = max(5, int(seconds))
+    except (TypeError, ValueError):
+        pass
 
 
 def _get_json(url: str, headers: dict | None = None, timeout: int = 10) -> dict:
@@ -101,7 +135,7 @@ class OllamaProvider(Provider):
             out = []
             for t in texts:
                 d = _post_json(f"{self._base()}/api/embeddings",
-                               {"model": self.config.embed_model, "prompt": t}, timeout=30)
+                               {"model": self.config.embed_model, "prompt": t})
                 out.append(d["embedding"])
             return out
         except Exception:
@@ -200,6 +234,7 @@ provider_registry = ProviderRegistry()
 
 
 def bootstrap(config: Config) -> ProviderRegistry:
+    set_llm_timeout(getattr(config, "llm_timeout", 300))  # config manda no timeout de chat/embed
     provider_registry.build_default(config)
     return provider_registry
 

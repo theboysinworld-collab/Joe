@@ -65,6 +65,9 @@ class Agent:
             from .llm import bootstrap, auto_select
             bootstrap(self.config)
             auto_select(self.config)
+        # config sempre manda no timeout (bootstrap só roda quando ainda não há ativo)
+        from .llm import set_llm_timeout
+        set_llm_timeout(getattr(self.config, "llm_timeout", 300))
         self._rebuild_system()
 
     def child(self, sa) -> "Agent":
@@ -126,6 +129,7 @@ class Agent:
         self.messages.append({"role": "user", "content": user_text})
 
         # 2+3) PLANEJADOR + EXECUTOR
+        Agent._tool_results = {}      # turno novo: limpa registro de ferramentas p/ revisor
         has_llm = provider_registry.active() is not None
         reply = ""
         if has_llm:
@@ -133,13 +137,24 @@ class Agent:
         else:
             reply = self._run_offline_plan(user_text, intent, echo)
 
-        # 4) REVISOR (leve, determinístico: checa plausibilidade básica)
+        # 4) REVISOR (determinístico: plausibilidade + falhas estruturadas de ferramenta)
         review = self._review(reply, intent)
         self._step("revisor", verdict=review["verdict"], note=review["note"])
-        if review["verdict"] == "refazer" and has_llm:
-            self.messages.append({"role": "user",
-                                  "content": f"[revisão] {review['note']}. Refaça corrigindo."})
-            reply = self._run_tool_loop(echo)
+        if review["verdict"] == "refazer":
+            if has_llm:
+                self.messages.append({"role": "user",
+                                      "content": f"[revisão] {review['note']}. Refaça corrigindo."})
+                Agent._tool_results = {}
+                reply = self._run_tool_loop(echo)
+            elif any(not ok for ok in Agent._tool_results.values()):
+                # offline: retrabalho honesto — re-plano com o erro visível na intenção
+                err_note = "; ".join(f"{t} falhou" for t, ok in Agent._tool_results.items() if not ok)
+                self._step("planejador", note=f"retrabalho após falha: {err_note}")
+                retry = self._run_offline_plan(user_text, intent, echo)
+                if not any(not ok for ok in Agent._tool_results.values()):
+                    reply = retry
+                else:
+                    reply += f"\n\n⚠ revisão: ainda há falhas ({err_note}) — refine o pedido."
 
         # 5) CONCLUSÃO + proatividade
         self.messages.append({"role": "assistant", "content": reply})
@@ -175,6 +190,7 @@ class Agent:
                     echo(f"⚙ {fn}({_short(args)})")
                     bus.emit("agent.tool", agent=self.agent_id, tool=fn, args=_short(args))
                     result = registry.execute(fn, args)
+                    Agent._tool_results[fn] = result.ok
                     if fn == "remember":
                         bus.emit("agent.memory", agent=self.agent_id, saved=str(args)[:120])
                     bus.emit("agent.tool_result", agent=self.agent_id, tool=fn,
@@ -228,6 +244,7 @@ class Agent:
             bus.emit("agent.plan_step", agent=self.agent_id, tool=step["name"],
                      args=_short(step["args"]))
             r = registry.execute(step["name"], step["args"])
+            Agent._tool_results[step["name"]] = r.ok
             # executor reporta a decisão/resultado ao grafo (o que criou/executou)
             self._step("executor", note=f"{step['name']} → {r.as_text()[:60]}")
             outs.append(f"{step['name']}: {r.as_text()[:600]}")
@@ -241,7 +258,16 @@ class Agent:
         fail_markers = ("ERRO:", "Traceback", "falhou")
         if intent in ("editar_codigo", "criar_arquivo") and any(m in reply for m in fail_markers):
             return {"verdict": "refazer", "note": "erros visíveis no resultado da tarefa de código"}
+        # revisão de FERRAMENTA (não só do texto): se o turno executou ferramentas e
+        # alguma falhou, o revisor detecta nos marcadores estruturados e exige retrabalho.
+        failed_tools = [t for t, ok in Agent._tool_results.items() if not ok]
+        if failed_tools:
+            return {"verdict": "refazer",
+                    "note": f"ferramenta(s) com falha não reportada: {', '.join(failed_tools[:3])}"}
         return {"verdict": "ok", "note": "resultado coerente com a intenção"}
+
+    # registro por-turno de quais ferramentas rodaram e se passaram (limpo em chat())
+    _tool_results: dict[str, bool] = {}
 
     # ------------------------------------------------------------ histórico
     def _save_history(self, user_text: str, reply: str) -> None:

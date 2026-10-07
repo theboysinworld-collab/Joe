@@ -29,6 +29,17 @@ pip install -e .                      # opcional: comando global `joe`
 - **Auto-expansão**: intenção sem playbook + ferramenta registrada (ex.: criada por extensão
   via `/newext`) → usada no mesmo turno, sem editar o núcleo.
 
+## Modelos locais lentos (>120s) — timeout configurável
+Ollama em CPU, contexto grande ou primeiro carregamento do modelo podem demorar mais de
+120s. O Joe trata isso em camadas:
+- `config.llm_timeout` (padrão **300s** por tentativa) — ajustável com
+  `/config llm_timeout 600` no REPL (aplica na hora, sem reiniciar) ou via env `JOE_LLM_TIMEOUT`.
+- **Timeout é retryável**: até 3 tentativas com backoff (o modelo pode estar só carregando).
+- Se ainda assim falhar, o turno **não morre**: o agente cai no planner determinístico
+  offline e avisa `[LLM indisponível: …] — alternando para plano offline`.
+- Dica: mantenha o modelo quente com `OLLAMA_KEEP_ALIVE=-1` ou `/bench` para escolher
+  um modelo menor/rápido (ex.: `qwen2.5-coder:1.5b`).
+
 ## Memória e RAG (`joe/memory.py`)
 SQLite unificado (fatos, episódios, hábitos) + vetores; embeddings via ollama
 (`nomic-embed-text`) quando disponível, com fallback offline determinístico (hashing).

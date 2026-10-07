@@ -26,6 +26,9 @@ class Config:
     ollama_host: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     temperature: float = 0.3
     max_tokens: int = 4096
+    # timeout (s) por tentativa de chamada ao LLM; modelos locais lentos (CPU, contexto
+    # grande, primeiro carregamento) podem passar de 120s → aumente aqui ou via env.
+    llm_timeout: int = int(os.environ.get("JOE_LLM_TIMEOUT", "300"))
     # máximas iterações agente<->ferramentas por turno
     max_tool_iterations: int = 12
     # pedir confirmação antes de executar comandos shell?

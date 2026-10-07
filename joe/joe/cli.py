@@ -203,8 +203,16 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
             print("chave OpenRouter salva; provedores disponíveis:",
                   [p.id for p in provider_registry.available()])
         else:
+            if k in ("llm_timeout", "max_tool_iterations", "shell_output_limit"):
+                try:
+                    v = int(v.strip())
+                except ValueError:
+                    print(f"{k} precisa ser um número inteiro"); return True
             setattr(cfg, k, v)
             cfg.save()
+            if k == "llm_timeout":
+                from .llm import set_llm_timeout
+                set_llm_timeout(v)
             print(f"config {k} atual")
     elif cmd == "/rag":
         for h in mem.search(rest, k=6):

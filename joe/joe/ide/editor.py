@@ -12,6 +12,7 @@ Sem dependências externas — funciona em qualquer tty. Comandos:
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -65,7 +66,9 @@ class MiniIDE:
             return "nenhum buffer aberto (:open ou :new primeiro)"
         target = (self.root / name).expanduser() if name else buf.path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(buf.text(), encoding="utf-8")
+        tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
+        tmp.write_text(buf.text(), encoding="utf-8")
+        os.replace(tmp, target)  # escrita atômica: nunca corrompe o arquivo no meio
         buf.path = target
         buf.dirty = False
         self.buffers[self._key(target)] = buf
