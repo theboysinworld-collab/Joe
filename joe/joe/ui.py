@@ -121,11 +121,12 @@ class UI:
         self.console = Console()
 
     def header(self, provider: str, model: str, tools: int, mode: str) -> None:
+        # NOTE: kwargs de layout pertencem ao Panel, não a Console.print()
         self.console.print(Panel(
             Text.assemble(("joe ", "bold green"), (f"· {provider or 'offline-planner'}", "cyan"),
                           (f" · {model}" if model else "", ""), (f" · {tools} ferramentas", "dim"),
                           (f" · {mode}", "magenta")),
-            ), title=None, border_style="blue", padding=(0, 1))
+            border_style="blue", padding=(0, 1)))
 
     def graph(self) -> None:
         self.console.print(graph_panel())

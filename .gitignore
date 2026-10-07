@@ -1,6 +1,10 @@
-__pycache__/node_modules/
+# Python compiled files
+__pycache__/
+*.pyc
+
+# Environment and config (common for Python projects, though not explicitly in diff, standard practice)
+.envnode_modules/
 .next/
 dist/
 build/
 *.log
-node_modules/

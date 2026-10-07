@@ -234,27 +234,48 @@ class WebSearchCapability(Capability):
         return True  # usa stdlib; se não houver rede, devolve aviso claro
 
     def perceive(self, query: str = "", max_results: int = 6, **_) -> str:
+        """Busca com cascatas de fallback (arquitetura offline-first):
+        1) DDG lite via POST (mais estável)  2) DDG html  3) aviso claro."""
         if not query:
             return "informe a busca."
-        url = ("https://html.duckduckgo.com/html/?q=" + urllib.parse.quote_plus(query))
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 joe-agent"})
-        try:
-            html = urllib.request.urlopen(req, timeout=15).read().decode(errors="replace")
-        except Exception as e:
-            return f"sem acesso à internet ({e}); use /rag para buscar no que já sei."
+        import html as _html
         import re
-        results = []
-        for m in re.finditer(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>'
-                             r'(?:.*?<a[^>]+class="result__snippet"[^>]*>(.*?)</a>)?',
-                             html, re.S):
-            href, title, snip = m.group(1), m.group(2), m.group(3) or ""
-            clean = lambda s: re.sub(r"<[^>]+>", "", s).strip()
-            if href.startswith("//duckduckgo.com/l/") or "/yad.js" in href:
-                continue  # pula anúncios
-            results.append(f"- {clean(title)}\n  {clean(snip)[:200]}\n  {href}")
-            if len(results) >= max_results:
+        ua = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"}
+        attempts = [
+            ("https://lite.duckduckgo.com/lite/",
+             urllib.parse.urlencode({"q": query}).encode()),
+            ("https://html.duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query}), None),
+        ]
+        last_err = None
+        for url, data in attempts:
+            try:
+                page = urllib.request.urlopen(
+                    urllib.request.Request(url, data=data, headers=ua), timeout=15
+                ).read().decode(errors="replace")
+            except Exception as e:
+                last_err = e
+                continue
+            results = self._extract(page, re, _html, max_results)
+            if results:
+                return "\n".join(results)
+        return (f"sem acesso à internet ou layout inesperado ({last_err}); "
+                "use /rag para buscar no que já sei.")
+
+    @staticmethod
+    def _extract(page: str, re_mod, html_mod, max_results: int) -> list[str]:
+        """Extrai pares título→link dos layouts lite/html do DuckDuckGo, filtrando ads."""
+        out = []
+        for m in re_mod.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]{10,140})</a>', page):
+            href, title = m.group(1), m.group(2)
+            if "duckduckgo-help-pages" in href or "/yad.js" in href or "duck.co" in href:
+                continue  # anúncios/páginas próprias do DDG
+            title = html_mod.unescape(title.strip())
+            if any(r.split("\n")[0].find(title) != -1 for r in out):
+                continue
+            out.append(f"- {title}\n  {href}")
+            if len(out) >= max_results:
                 break
-        return "\n".join(results) or "nenhum resultado extraível (layout mudou?)"
+        return out
 
 
 # ---------------------------------------------------------------- registry
