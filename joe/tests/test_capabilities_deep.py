@@ -4,19 +4,38 @@ from joe import capabilities as cap
 
 
 class FakeResult:
-    def __init__(self, stdout="", returncode=0):
-        self.stdout, self.returncode = stdout, returncode
+    def __init__(self, stdout="", returncode=0, stderr=""):
+        self.stdout, self.returncode, self.stderr = stdout, returncode, stderr
 
 
-def _stub_run(monkeypatch, results=None, create_file=None):
-    """subprocess.run fake: registra chamados, opcionalmente cria arquivo 'gravado'."""
+def _stub_run(monkeypatch, results=None, create_file=None, rc=None):
+    """subprocess.run fake: registra chamados, opcionalmente cria arquivo 'gravado'.
+
+    results/rc podem ser dict keyed pelo executável do comando (cmd[0]) ou valor único.
+    """
     calls = []
+
+    def _pick(table, cmd, default):
+        if isinstance(table, dict):
+            return table.get(str(cmd[0]), default)
+        return default if table is None else table
 
     def fake_run(cmd, **kw):
         calls.append(cmd)
         if create_file and str(cmd[-1]) == str(create_file):
             create_file.write_bytes(b"PNG")
-        return FakeResult(stdout=(results or {}).get(str(cmd[0]), ""))
+        # resultados podem ser buscados pelo executável (cmd[0]), caminho completo (str(cmd[0])) OU nome base
+        table = results or {}
+        stdout = ""
+        if isinstance(table, dict):
+            exe_full = str(cmd[0])
+            exe_base = exe_full.split("/")[-1]  # "/x/whisper-cli" → "whisper-cli"
+            stdout = table.get(exe_base, table.get(exe_full, table.get(cmd[0], "")))
+        else:
+            stdout = table or ""
+        stderr = _pick(getattr(fake_run, "stderr_map", None), cmd, "boom")
+        code = _pick(rc, cmd, 0)
+        return FakeResult(stdout=stdout, returncode=code, stderr=stderr)
     monkeypatch.setattr(subprocess, "run", fake_run)
     return calls
 
@@ -48,13 +67,18 @@ def test_hearing_unavailable_message(monkeypatch):
 
 def test_hearing_with_tools(monkeypatch, tmp_path):
     wav = tmp_path / "joe_listen.wav"
-    monkeypatch.setattr(cap.shutil, "which",
-                        lambda n: {"arecord": "/x/arecord", "whisper": "/x/whisper"}.get(n))
+
+    def which(n):
+        # whisper-cli existe mas whisper não → o código deve resolver p/ whisper-cli
+        return {"arecord": "/x/arecord", "whisper-cli": "/x/whisper-cli"}.get(n)
+
+    monkeypatch.setattr(cap.shutil, "which", which)
     monkeypatch.setattr(cap.tempfile, "gettempdir", lambda: str(tmp_path))
-    calls = _stub_run(monkeypatch, results={"whisper": "texto transcrito"}, create_file=wav)
+    calls = _stub_run(monkeypatch, results={"whisper-cli": "texto transcrito"})
     out = cap.HearingCapability().perceive(seconds=2)
     assert out == "texto transcrito"
     assert any(c[0] == "arecord" for c in calls)
+    assert calls[-1][0] == "/x/whisper-cli"  # transcritor realmente usado
 
 
 # ---------------------------------------------------------------- ver tela/câmera
@@ -104,14 +128,9 @@ def test_video_usage_hint(monkeypatch):
 
 def test_video_trim_ok_and_fail(monkeypatch):
     monkeypatch.setattr(cap.shutil, "which", lambda n: "/x/ffmpeg" if n == "ffmpeg" else None)
-
-    def make(rc, err="boom"):
-        def fake_run(cmd, **kw):
-            return FakeResult(returncode=rc)
-        monkeypatch.setattr(subprocess, "run", fake_run)
-    make(0)
+    _stub_run(monkeypatch, rc=0)
     assert "ok →" in cap.VideoEditCapability().perceive(action="trim", src="a.mp4", dst="b.mp4")
-    make(1)
+    _stub_run(monkeypatch, rc=1)  # novo stub com returncode=1 → caminho de falha
     assert "falhou" in cap.VideoEditCapability().perceive(action="convert", src="a", dst="b")
 
 
