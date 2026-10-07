@@ -154,7 +154,7 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
     cmd, rest = parts[0].lower(), (parts[1] if len(parts) > 1 else "")
     if cmd in ("/exit", "/quit"):
         return False
-    if cmd == "/help":
+    if cmd in ("/help", "/comandos"):
         print(HELP)
     elif cmd == "/graph" and rest.strip().lower() in ("live", "ao vivo", "vivo"):
         # loop ao vivo: redesenha o grafo continuamente até o usuário teclar q
