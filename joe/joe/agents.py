@@ -165,6 +165,10 @@ def classify_intent(text: str) -> tuple[str, float]:
     #    é uma ordem de escrita real — não conversa nem listagem ("lista de compras")
     if best != "criar_arquivo" and _split_write(text):
         return "criar_arquivo", round(best_score, 2)
+    # desempate determinístico (leitura): verbo de leitura no início + arquivo real
+    # ('abre o readme.md') → ler_arquivo, não conversa.
+    if best == "conversar" and _has_read_target(text):
+        return "ler_arquivo", max(best_score, 2.8)
     if best_score < 2.6:
         # limiar baixo só vale p/ conversa; verbo de escrita + arquivo nunca é vazio
         if not _has_write_target(text):
