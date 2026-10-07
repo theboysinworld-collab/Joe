@@ -119,6 +119,18 @@ class LearnTool(Tool):
         return ToolResult(output=f"aprendido gravado #{mid}: {lesson[:120]}")
 
 
+class AskDetailTool(Tool):
+    """Terminal gracioso do planner offline: sem alvo suficiente, pergunta (não falha)."""
+    name = "ask_detail"
+    description = ("Usada internamente quando o pedido é legítimo mas falta um dado (qual arquivo? "
+                   "qual conteúdo?). Devolve a pergunta pronta para o usuário. Args: question.")
+    parameters = {"type": "object", "properties": {
+        "question": {"type": "string"}}, "required": ["question"]}
+
+    def run(self, question: str) -> ToolResult:
+        return ToolResult(output=f"❓ preciso de um detalhe: {question}")
+
+
 class PredictNeedsTool(Tool):
     name = "predict_needs"
     description = "Retorna previsões proativas baseadas nos hábitos do usuário nesta hora do dia."
@@ -145,5 +157,6 @@ class ShowGraphTool(Tool):
 
 
 for t in (SpawnSubagentTool(), CreateExtensionTool(), SelfUpdateTool(),
-          HealthCheckTool(), LearnTool(), PredictNeedsTool(), ShowGraphTool()):
+          HealthCheckTool(), LearnTool(), PredictNeedsTool(), ShowGraphTool(),
+          AskDetailTool()):
     registry.register(t)

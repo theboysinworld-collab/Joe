@@ -65,6 +65,11 @@ class Agent:
             auto_select(self.config)
         self._rebuild_system()
 
+    def child(self, sa) -> "Agent":
+        """Fábrica plugável de sub-agentes: herdar daqui é o único hook para
+        trocar/compor o motor do filho sem tocar em agents.py nem no pipeline."""
+        return Agent(config=self.config, memory=self.memory, subagent=sa)
+
     # ------------------------------------------------------------ contexto
     def _rebuild_system(self, extra_ctx: str = "") -> None:
         parts = [SYSTEM_PROMPT, f"cwd: {Path.cwd()}", f"agente: {self.agent_name} ({self.agent_id})"]

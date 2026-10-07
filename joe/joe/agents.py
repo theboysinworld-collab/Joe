@@ -159,25 +159,96 @@ def classify_intent(text: str) -> tuple[str, float]:
 
 # ---------------------------------------------------------------- planner determinístico offline
 def deterministic_plan(text: str) -> list[dict]:
-    """Passo a passo executável SEM LLM — a base age sozinha quando a API falta."""
+    """Passo a passo executável SEM LLM — a base age sozinha quando a API falta.
+
+    PLAYBOOK DE AÇÕES (passo a passo embutido no código, requisito de instruções
+    pré-definidas por intenção):
+      ler_arquivo  → extrair alvo → read_file(alvo) | sem alvo: pedir detalhe
+      executar     → extrair comando entre aspas/backticks → bash(cmd)
+      memoria      → destripar verbos ('lembre-se que ...') → remember(fato limpo)
+      buscar_web   → destripar 'pesquise na internet por X' → search_web(X)
+      visual       → 'camera/foto' → camera_view | senão see_screen
+      celular      → 'notifica X' → phone(notificar) | 'abre app X' → abrir_app
+      mostrar_grafo→ show_graph (UI pura, sem LLM)
+      sub_agente   → nome+alvo extraídos → spawn_subagent(name, goal)
+      criar/editar/planejar/conversar → sem plano fixo: exigem conteúdo/LLM;
+            o Agent responde com fallback instruído (nunca falha silenciosa).
+    """
     intent, _ = classify_intent(text)
     plans: dict[str, list[dict]] = {
-        "ler_arquivo": lambda: [{"name": "read_file", "args": {"path": _first_path(text)}}],
+        "ler_arquivo": lambda: _plan_read(text),
         "executar": lambda: [{"name": "bash", "args": {"command": _first_cmd(text)}}],
-        "memoria": lambda: [{"name": "remember", "args": {"text": text, "tag": "usuario"}}],
-        "buscar_web": lambda: [{"name": "search_web", "args": {"query": text}}],
-        "visual": lambda: [{"name": "see_screen", "args": {}}],
-        "celular": lambda: [{"name": "phone", "args": {"action": "status"}}],
+        "memoria": lambda: [{"name": "remember", "args": {"text": _strip_fact(text), "tag": "usuario"}}],
+        "buscar_web": lambda: [{"name": "search_web", "args": {"query": _strip_query(text)}}],
+        "visual": lambda: ([{"name": "camera_view", "args": {}}]
+                           if _fold(text).__contains__("camera") or "foto" in _fold(text)
+                           else [{"name": "see_screen", "args": {}}]),
+        "celular": lambda: _plan_phone(text),
         # intenções de UI/orquestração → ferramenta interna (não pedem arquivo nem LLM)
         "mostrar_grafo": lambda: [{"name": "show_graph", "args": {}}],
         "sub_agente": lambda: [{"name": "spawn_subagent",
-                                "args": {"name": _sub_name(text), "goal": text}}],
+                                "args": {"name": _sub_name(text), "goal": _sub_goal(text)}}],
         "criar_arquivo": lambda: [],   # precisa de conteúdo → LLM ou pedido de detalhe
         "editar_codigo": lambda: [],
         "planejar": lambda: [],
         "conversar": lambda: [],
     }
     return plans.get(intent, lambda: [])()
+
+
+def _plan_read(text: str) -> list[dict]:
+    target = _first_path(text)
+    if target.startswith("("):        # sem alvo extraível → não chamar read_file à toa
+        return [{"name": "ask_detail", "args": {"question":
+                "qual arquivo devo ler? (ex.: leia joe/config.py)"}}]
+    return [{"name": "read_file", "args": {"path": target}}]
+
+
+def _plan_phone(text: str) -> list[dict]:
+    t = _fold(text)
+    if any(w in t for w in ("notific", "avisa", "alerta")):
+        return [{"name": "phone", "args": {"action": "notificar",
+                                           "message": text}}]
+    if any(w in t for w in ("abre", "abrir", "abra")):
+        app = re.search(r"(?:app|aplicativo)\s+([\w.-]+)", t)
+        return [{"name": "phone", "args": {"action": "abrir_app",
+                                           "app": app.group(1) if app else text}}]
+    return [{"name": "phone", "args": {"action": "status"}}]
+
+
+_FACT_STRIP = re.compile(
+    r"^(?:por\s+favor[, ]+|me\s+)?(?:lembre[-\s]?se?\s+(?:que|de)?|nunca\s+esque(?:ça|ca)\s+(?:que|de)?"
+    r"|anote\s+(?:que|isso)?|memorize?\s+(?:que|isto)?|guarde\s+(?:que|isto)?|decor(?:e|a)\s+(?:que|de)?)[,: ]*",
+    re.I)
+
+
+def _strip_fact(text: str) -> str:
+    """'lembre-se que meu nome é Carlos' → 'meu nome é Carlos' (fato limpo na memória)."""
+    out = _FACT_STRIP.sub("", text.strip(), count=1)
+    return out.strip() or text.strip()
+
+
+_QUERY_STRIP = re.compile(
+    r"^(?:pesquis(?:e|ar|a)?|busqu(?:e|ar|a)?|procur(?:e|ar|a)?|procure)[^\"]*?(?:por|sobre|na\s+web|online|internet)?[ :]",
+    re.I)
+
+
+def _strip_query(text: str) -> str:
+    """'pesquise na internet por clima em Recife' → 'clima em Recife'."""
+    m = re.search(r"(?:por|sobre)\s+(.+)$", text, re.I)
+    if m:
+        return m.group(1).strip(" ?.!")
+    out = _QUERY_STRIP.sub("", text.strip(), count=1)
+    return out.strip(" ?.!") or text.strip()
+
+
+def _sub_goal(text: str) -> str:
+    """Isola a meta real do filho (playbook: 'um agente X PARA <meta>')."""
+    m = re.search(r"\b(?:para|pra)\s+(.+)$", text, re.I | re.S)
+    goal = m.group(1).strip() if m else text
+    # remove prefixos residuais de delegação ('um filho …', 'o agente …')
+    goal = re.sub(r"^(?:um|o|a|um\s+filho|filho|agente|sub[-\s]?agente)[\w-]*\s+", "", goal, flags=re.I)
+    return goal.strip() or text
 
 
 def _first_path(text: str) -> str:
@@ -194,7 +265,11 @@ def _sub_name(text: str) -> str:
 
 
 def _first_cmd(text: str) -> str:
-    m = re.search(r"(?:rode|execute|run|rodar)\s+[`'\"]?([^`'\"\n]+)", text, re.I)
+    m = re.search(r"(?:rode|execute|executar|run|rodar)\s+[`'\"]?([^`'\"\n]+)", text, re.I)
+    if m:
+        return m.group(1).strip()
+    # sem comando delimitado: extrai a frase depois do verbo e remove pontuação final
+    m = re.search(r"(?:rode|execute|executar|run|rodar)\s+(.+?)\s*[.!?]*$", text, re.I)
     return m.group(1).strip() if m else "pwd && ls"
 
 
@@ -226,24 +301,40 @@ def spawn_subagent(name: str, goal: str, agent_factory=None, parent: str = "joe"
 
 
 def _default_factory(goal: str, sa: SubAgent):
-    """Filho SEM LLM usa o planner determinístico diretamente (sem Agent completo).
+    """Filho usa o MELHOR motor disponível, com orçamento limitado.
 
-    Motivo: Agent._run_offline_plan executaria esta mesma ferramenta para a
-    intenção `sub_agente`, gerando recursão pai→filho→pai… O filho aqui herda
-    o registry de tools e emite seus eventos no bus (aparece no grafo), mas
-    roda um mini-loop próprio com orçamento limitado.
+    Ordem de decisão (camadas plugáveis — sem tocar no núcleo):
+      1. LLM ativo → filho é um Agent(subagent=sa) real: herda pipeline
+         intenção→plano→execução→revisão→conclusão e o loop de ferramentas.
+      2. sem LLM → planner determinístico direto no registry de tools
+         (não instamos Agent completo para evitar recursão sub_agente→spawn).
+    Em ambos os casos o filho emite eventos no bus → nó novo no grafo.
     """
     def run():
         from .tools.base import registry          # late import (evita ciclo)
-        steps = [s for s in deterministic_plan(goal) if s["name"] != "spawn_subagent"]
-        if not steps:
-            return f"[{sa.name}] tarefa entendida como '{classify_intent(goal)[0]}', sem ação direta offline."
-        outs = []
-        bus.emit("agent.thought", id=sa.id, thought=f"planejei {len(steps)} passo(s): "
-                 + ", ".join(s["name"] for s in steps))
-        for st in steps[:4]:                      # orçamento do filho
-            r = registry.execute(st["name"], st["args"])
-            bus.emit("agent.tool", id=sa.id, tool=st["name"], ok=r.ok)
-            outs.append(f"{st['name']}: {r.as_text()[:400]}")
-        return "\n".join(outs)
+        from .llm import provider_registry
+        if provider_registry.active() is not None:
+            from .agent import Agent              # late import: evita ciclo agents↔agent
+            child = Agent(subagent=sa)
+            try:
+                return child.chat(goal)
+            except Exception as e:
+                return f"[{sa.name}] com LLM falhou ({e}); caindo para plano offline]\n" + \
+                       _offline_child(goal, sa, registry)
+        return _offline_child(goal, sa, registry)
     return run
+
+
+def _offline_child(goal: str, sa: SubAgent, registry) -> str:
+    steps = [s for s in deterministic_plan(goal) if s["name"] != "spawn_subagent"]
+    if not steps:
+        return (f"[{sa.name}] tarefa entendida como '{classify_intent(goal)[0]}' — "
+                "sem ação direta offline (precisa de conteúdo/LLM; eu, Joe, explico no resultado).")
+    outs = []
+    bus.emit("agent.thought", id=sa.id, agent=sa.id, thought=f"planejei {len(steps)} passo(s): "
+             + ", ".join(s["name"] for s in steps))
+    for st in steps[:4]:                          # orçamento do filho
+        r = registry.execute(st["name"], st["args"])
+        bus.emit("agent.tool", id=sa.id, agent=sa.id, tool=st["name"], ok=r.ok)
+        outs.append(f"{st['name']}: {r.as_text()[:400]}")
+    return "\n".join(outs)

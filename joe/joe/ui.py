@@ -41,20 +41,29 @@ for n in PIPELINE:
     STATE.touch(n)
 
 
+# ---------------------------------------------------------------- UI grafo (nós = papéis do pipeline)
+def _node_id(role: str, agent_name: str) -> str:
+    """Nó canônico por papel do pipeline; sub-agentes ganham nó próprio."""
+    return _ROLE_MAP.get(role, agent_name.lower())
+
+
 def _listener(ev: dict) -> None:
     t, p = ev["topic"], ev
     if t == "agent.step":
         role = p.get("role", "?")
-        aid = p.get("name", "Joe").lower()
-        STATE.touch(aid, f"{role}: {p.get('intent') or p.get('verdict') or p.get('mode') or ''}")
-        prev = PIPELINE[PIPELINE.index(_ROLE_MAP.get(role, "executor")) - 1] if role in _ROLE_MAP else "executor"
-        STATE.edges.append((prev, aid))
+        nid = _node_id(role, p.get("name", "Joe"))
+        STATE.touch(nid, f"{role}: {p.get('intent') or p.get('verdict') or p.get('mode') or ''}")
+        # aresta real do pipeline: papel anterior → papel atual (nunca crasha)
+        seq = [_ROLE_MAP.get(r, r) for r in _PIPELINE_ROLES]
+        cur = _ROLE_MAP.get(role, role)
+        if cur in seq and seq.index(cur) > 0:
+            STATE.edges.append((seq[seq.index(cur) - 1], cur))
     elif t == "agent.thought":
-        STATE.touch(p["agent"], f"💭 {p['thought'][:50]}")
+        STATE.touch(p.get("agent", "joe"), f"💭 {p['thought'][:50]}")
     elif t == "agent.tool":
-        STATE.touch(p["agent"], f"⚙ {p['tool']}")
+        STATE.touch(p.get("agent", "joe"), f"⚙ {p['tool']}")
     elif t == "agent.memory":
-        STATE.touch(p["agent"], f"🧠 {p['saved'][:40]}")
+        STATE.touch(p.get("agent", "joe"), f"🧠 {p['saved'][:40]}")
     elif t == "agent.born":
         STATE.touch(p["name"].lower(), f"sub-agente: {p['goal'][:40]}")
     elif t == "agent.handoff":
@@ -65,12 +74,14 @@ def _listener(ev: dict) -> None:
 
 _ROLE_MAP = {"intencao": "intenção", "planejador": "planejador", "executor": "executor",
              "revisor": "revisor", "conclusao": "conclusão"}
+# ordem canônica dos papéis emitidos pelo Agent._step (sem acentos)
+_PIPELINE_ROLES = ("intencao", "planejador", "executor", "revisor", "conclusao")
 bus.subscribe("agent", _listener)
 bus.subscribe("ext", _listener)
 
 
 def render_graph(width: int = 72, opacity_pct: int = 35) -> Text:
-    """Desenha os nós num anel central translúcido (vibe n8n) + arestas textuais."""
+    """Desenha os nós num anel central translúcido (vibe n8n) + arestas pontilhadas."""
     ids = list(STATE.nodes)
     canvas = [[" "] * width for _ in range(9)]
     cx, cy = width // 2, 4
@@ -83,21 +94,28 @@ def render_graph(width: int = 72, opacity_pct: int = 35) -> Text:
 
     positions = {}
     n = max(len(ids), 1)
+    # rótulo curto do nó (evita sobreposição em anéis apertados)
+    labels = {nid: (nid[:10] + "…" if len(nid) > 10 else nid) for nid in ids}
     for i, nid in enumerate(ids):
         ang = 2 * math.pi * i / n - math.pi / 2
         x = int(cx + rx * math.cos(ang))
         y = int(cy + ry * round(math.sin(ang), 2) * 2)
         positions[nid] = (x, y)
-    # arestas: linha pontilhada entre nós conectados (últimas 12)
+    # arestas: linha pontilhada entre nós conectados (últimas 12, sem duplicatas)
+    seen_edges = set()
     for a, b in STATE.edges[-12:]:
-        if a in positions and b in positions:
-            (x1, y1), (x2, y2) = positions[a], positions[b]
-            steps = max(abs(x2 - x1), abs(y2 - y1), 1)
-            for k in range(1, steps):
-                px = max(0, min(width - 1, int(x1 + (x2 - x1) * k / steps)))
-                py = max(0, min(len(canvas) - 1, int(y1 + (y2 - y1) * k / steps)))
-                if canvas[py][px] == " ":
-                    canvas[py][px] = "·"
+        if (a, b) in seen_edges or a not in positions or b not in positions:
+            continue
+        seen_edges.add((a, b))
+        (x1, y1), (x2, y2) = positions[a], positions[b]
+        steps = max(abs(x2 - x1), abs(y2 - y1), 1)
+        for k in range(1, steps):
+            px = max(0, min(width - 1, int(x1 + (x2 - x1) * k / steps)))
+            py = max(0, min(len(canvas) - 1, int(y1 + (y2 - y1) * k / steps)))
+            if canvas[py][px] == " ":
+                canvas[py][px] = "·"
+    for nid, (x, y) in positions.items():
+        put(x - len(labels[nid]) // 2, y, f"⟨{labels[nid]}⟩")
     out = Text()
     alpha = 0.25 + 0.75 * (opacity_pct / 100)
     dim = alpha < 0.8
