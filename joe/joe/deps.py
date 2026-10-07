@@ -97,6 +97,51 @@ def status() -> dict[str, bool]:
     return out
 
 
+# ------------------------------------------------------- binários de sistema (CLI)
+_BIN_PKGS = {  # binário → pacotes por gerenciador (apt/dnf/pacman/brew/pkg[Termux/Android])
+    "espeak-ng":   {"apt": "espeak-ng", "dnf": "espeak-ng", "pacman": "espeak-ng", "brew": "espeak-ng"},
+    "espeak":      {"apt": "espeak", "dnf": "espeak", "pacman": "espeak", "brew": "espeak"},
+    "ffmpeg":      {"apt": "ffmpeg", "dnf": "ffmpeg-free", "pacman": "ffmpeg", "brew": "ffmpeg"},
+    "tesseract":   {"apt": "tesseract-ocr", "dnf": "tesseract", "pacman": "tesseract", "brew": "tesseract"},
+    "scrot":       {"apt": "scrot", "dnf": "scrot", "pacman": "scrot", "brew": "scrot"},
+    "whisper-cpp": {"apt": "whisper-cpp", "dnf": "whisper-cpp", "pacman": "whisper-cpp", "brew": "whisper-cpp"},
+    "termux-api":  {"pkg": "termux-api"},  # Android/Termux: pkg install termux-api
+}
+
+
+def ensure_bin(name: str, timeout: int = 180) -> tuple[bool, str]:
+    """Garante um binário de sistema; se ausente tenta baixar via gerenciador local.
+    Em Termux/Android usa `pkg`; em desktop apt/dnf/pacman/brew conforme disponível.
+    Retorna (ok, detalhe). Nunca lança exceção — o chamador cai no fallback."""
+    try:
+        if shutil.which(name):
+            return True, f"{name}: já instalado"
+        pkgs = _BIN_PKGS.get(name)
+        if not pkgs:
+            return False, f"{name}: sem mapeamento de pacote (instale manualmente)"
+        installer = next((c for c in ("pkg", "apt-get", "dnf", "pacman", "brew")
+                          if shutil.which(c)), None)
+        if installer is None:
+            return False, f"{name}: nenhum gerenciador de pacotes encontrado"
+        key = {"apt-get": "apt", "dnf": "dnf", "pacman": "pacman",
+               "brew": "brew", "pkg": "pkg"}[installer]
+        pkg = pkgs.get(key)
+        if not pkg:
+            return False, f"{name}: pacote indisponível para {installer}"
+        cmd = {"apt-get": [installer, "install", "-y", pkg],
+               "dnf": [installer, "install", "-y", pkg],
+               "pacman": [installer, "-S", "--noconfirm", "--needed", pkg],
+               "brew": [installer, "install", pkg],
+               "pkg": [installer, "install", "-y", pkg]}[installer]
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=timeout, check=False)
+        ok = shutil.which(name) is not None
+        detail = f"{name}: {'instalado' if ok else 'falha'} via {installer} ({pkg}) rc={r.returncode}"
+        return ok, detail + ("" if ok or not r.stderr else f" — {r.stderr[-200:]}")
+    except Exception as e:  # nunca derruba o turno por causa de instalação
+        return False, f"{name}: erro ao tentar instalar: {e}"
+
+
 def tools_status() -> dict[str, bool]:
     """Binários externos que as capacidades usam (nunca instalados por pip)."""
     bins = ["espeak", "espeak-ng", "say", "ffmpeg", "scrot", "grim",

@@ -53,8 +53,13 @@ class SpeechCapability(Capability):
         for e in ("espeak", "espeak-ng"):
             if shutil.which(e):
                 return e
-        from .deps import ensure
-        if ensure("pyttsx3"):   # ausente/quebrada → Joe tenta baixar via pip
+        from .deps import ensure, ensure_bin
+        # ausente → Joe tenta baixar o binário (apt/dnf/pacman/brew; no Termux usa pkg)
+        for b in ("espeak-ng", "espeak"):
+            ok, _ = ensure_bin(b, timeout=120)
+            if ok and shutil.which(b):
+                return b
+        if ensure("pyttsx3"):   # última alternativa local via pip
             return "pyttsx3"
         return ""
 
@@ -194,10 +199,22 @@ class PhoneCapability(Capability):
     def available(self) -> bool:
         return shutil.which("termux-notification") is not None
 
+    def _ensure_api(self) -> str:
+        """No Termux/Android, tenta instalar termux-api se faltar (pkg install)."""
+        if self.available():
+            return ""
+        import os
+        if "com.termux" not in os.environ.get("PREFIX", ""):
+            return "API do celular indisponível (rode o Joe no Termux/Android para notificações/app/mensagens)."
+        from .deps import ensure_bin
+        ok, detail = ensure_bin("termux-api", timeout=180)
+        return (f"termux-api instalada — conceda as permissões do app Termux e tente de novo."
+                if ok else f"falha ao baixar termux-api: {detail}")
+
     def perceive(self, action: str = "status", title: str = "Joe", message: str = "",
                  app: str = "", phone: str = "", text: str = "", **_) -> str:
         if not self.available():
-            return "API do celular indisponível (rode o Joe no Termux/Android para notificações/app/mensagens)."
+            return self._ensure_api()
         run = lambda c: subprocess.run(c, capture_output=True, text=True, check=False)
         if action == "notificar":
             run(["termux-notification", "--title", title, "--content", message])
