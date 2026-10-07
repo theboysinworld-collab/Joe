@@ -94,7 +94,7 @@ INTENT_PROFILES: dict[str, list[str]] = {
                 "abre o app", "liga para", "instagram", "telegram", "aplicativo", "app"],
     "conversar": ["oi", "ola", "bom dia", "boa noite", "quem e voce", "obrigado",
                   "valeu", "legal", "e ai", "tudo bem"],
-    "listar": ["liste", "listar", "lista", "quais arquivos", "quais sao os arquivos",
+    "listar": ["liste", "listar", "lista de", "lista os", "quais arquivos", "quais sao os arquivos",
                "o que tem na pasta", "conteudo da pasta", "diretorios", "arquivos do"],
     "mostrar_grafo": ["grafo", "agentes", "quem esta trabalhando", "pipeline",
                       "mapa dos agentes", "visualizacao dos agentes"],
@@ -161,8 +161,14 @@ def classify_intent(text: str) -> tuple[str, float]:
         score += 0.8 * max(0, matched - 1)           # múltiplas pistas corroboram
         if score > best_score:
             best, best_score = intent, score
+    # 3) desempate determinístico: se a frase tem par (arquivo+conteúdo) extraível,
+    #    é uma ordem de escrita real — não conversa nem listagem ("lista de compras")
+    if best != "criar_arquivo" and _split_write(text):
+        return "criar_arquivo", round(best_score, 2)
     if best_score < 2.6:
-        best = "conversar"
+        # limiar baixo só vale p/ conversa; verbo de escrita + arquivo nunca é vazio
+        if not _has_write_target(text):
+            best = "conversar"
     return best, round(best_score, 2)
 
 
@@ -199,7 +205,7 @@ def deterministic_plan(text: str) -> list[dict]:
         "listar": lambda: _plan_list(text),
         "sub_agente": lambda: [{"name": "spawn_subagent",
                                 "args": {"name": _sub_name(text), "goal": _sub_goal(text)}}],
-        "criar_arquivo": lambda: [],   # precisa de conteúdo → LLM ou pedido de detalhe
+        "criar_arquivo": lambda: _plan_create(text),  # escrita offline quando há par arquivo+conteúdo
         "editar_codigo": lambda: [],
         "planejar": lambda: [],
         "conversar": lambda: [],
@@ -213,6 +219,109 @@ def _plan_read(text: str) -> list[dict]:
         return [{"name": "ask_detail", "args": {"question":
                 "qual arquivo devo ler? (ex.: leia joe/config.py)"}}]
     return [{"name": "read_file", "args": {"path": target}}]
+
+
+# ---------------------------------------------------------- escrita offline (playbook criar_arquivo)
+_EXT_RE = r"(?:\.(?:txt|md|py|js|ts|json|yaml|yml|toml|csv|html|css|log|ini|cfg|sh|rs|go|c|h))?"
+_DIR_PREP = ("em", "no", "na", "no arquivo", "pra", "para")   # preposições que anunciam o alvo
+
+def _split_write(text: str) -> tuple[str, str] | None:
+    """Extrai (arquivo, conteúdo) de frases literais de escrita, SEM LLM.
+
+    Formas reconhecidas (todas determinísticas):
+      'escreva OLA em x.txt'            → separador 'em' (sufixo)
+      'crie notas.txt com lista...'     → separador 'com'/'que'
+      'salve em projetos/ideias.md: ...'→ caminho + dois-pontos
+      'adicione na agenda.txt reuniao..'→ preposição + extensão
+      'grave isso no diario.txt: ...'   → pronome + preposição composta
+    Retorna None quando não há par (arquivo+conteúdo) confiável — nesse caso
+    o Agent cai no fallback instruído (nunca falha silenciosa).
+    """
+    if _READ_LEAD_RE.search(text):     # 'leia config.py pra mim' ≠ escrever
+        return None
+    t = text.strip()
+    # 0) sufixo forte: <conteúdo> em|no|na|para|pra <alvo-com-extensão>
+    m = re.search(r"^(?:\S+\s+)?(?:escrev\w*|col\w*|grav\w*|salv\w*|adicion\w*"
+                  r"|bot\w*|redij\w*|anot\w*)(?:\s+(?:isto|isso|aquilo))?\s+"
+                  r"(.+?)\s+(?:em|no|na|pra|para)\s+"
+                  r"((?:[\w.-]+[/\\])*[\w.-]+\.[a-zA-Z]{1,8})\s*[.:!?]*\s*$",
+                  t, re.I)
+    if m and len(m.group(1)) >= 2:
+        return m.group(2), m.group(1).strip(" .:!\"'")
+    # 1) padrão forte: <verbo> [prep] <alvo> <:|' com '|' que '|> <conteúdo>
+    m = re.search(
+        r"(?:escrev\w*|col\w*|grav\w*|salv\w*|adicion\w*|bot\w*|anot\w*|redij\w*)"
+        r"(?:\s+(?:isto|isso|aquilo|o seguinte|o texto))?[\s,:]+"
+        r"(?:(?:no arquivo|na pasta|em|no|na|pra|para)\s+)?"
+        r"((?:[\w.-]+[/\\])+[\w.-]+|[\w.-]+\.[a-zA-Z]{1,8}|[\w-]+)"
+        r"(?:\s*(?:com|que|contendo|de|:)[:,]?\s*)?(.+)$",
+        t, re.I)
+    if m:
+        path, content = m.group(1), m.group(2).strip(" .:!\"'")
+        # heurística anti-falso-positivo: se o 'conteúdo' começa com outro
+        # caminho e a 1ª captura era só um verbo solto, deslocamos o alvo
+        alt = re.match(r"^([\w.-]+\.[a-zA-Z]{1,8})\s+(?:com|que|:)?\s*(.+)$",
+                       content, re.I)
+        if alt and not re.search(r"[.]", path) and alt.group(1) != path:
+            path, content = alt.group(1), alt.group(2)
+        if len(content) >= 1 and path.lower() not in ("isso", "isto", "ele", "ela"):
+            return path, content
+    # 2) fraco: primeiro token com extensão conhecida + resto como conteúdo
+    m = re.search(r"\b([\w./-]+\.(?:txt|md|py|js|json|yaml|yml|log|csv|html|ini))\b\s+(.+)",
+                  t, re.I)
+    if m and len(m.group(2)) >= 2:
+        return m.group(1), m.group(2).strip(" .:!\"'")
+    return None
+
+
+# verbos de escrita usados no desempate determinístico do classificador
+_WRITE_VERB_RE = re.compile(
+    r"\b(?:escrev\w*|col\w*|grav\w*|salv\w*|adicion\w*|bot\w*|redij\w*|anot\w*|"
+    r"cri\w*|ger\w*|implement\w*|mont\w*)\b", re.I)
+# verbos de LEITURA: se abrem a frase, o arquivo é alvo de leitura, nunca de escrita
+_READ_LEAD_RE = re.compile(r"^\s*(?:me\s+)?(?:leia|ler|le\b|l[êe]\b|abri\w*|abre|mostra\w*"
+                           r"|mostre|confira|checa\w*|ve\s+o?\s*(?:arquivo|c[óo]digo))",
+                           re.I)
+_FILE_TOKEN_RE = re.compile(
+    r"(?:[\w.-]+[/\\])*[\w.-]+\.(?:txt|md|py|js|ts|json|yaml|yml|toml|csv|html|css|"
+    r"log|ini|cfg|sh|rs|go|c|h)\b", re.I)
+
+
+def _has_write_target(text: str) -> bool:
+    """True se a frase contém (verbo de escrita + token de arquivo) — sinal forte
+    de ordem de escrita, mesmo quando o par exato não é extraível.
+    Frases que começam com verbo de leitura ('leia x.py') são excluídas."""
+    if _READ_LEAD_RE.search(text):
+        return False
+    return bool(_WRITE_VERB_RE.search(text)) and bool(_FILE_TOKEN_RE.search(text))
+
+
+_READ_TOKEN_RE = re.compile(r"[\w./-]+\.[a-zA-Z]{1,8}\b")
+
+
+def _has_read_target(text: str) -> bool:
+    """Verbo de leitura no início + token de arquivo → intenção ler_arquivo,
+    mesmo sem palavra-chave do perfil ('abre o readme.md')."""
+    return bool(_READ_LEAD_RE.search(text)) and bool(_READ_TOKEN_RE.search(text))
+
+
+def _plan_create(text: str) -> list[dict]:
+    """Playbook de criação: escreve se houver par (arquivo+conteúdo); caso contrário
+    pede o detalhe faltante em vez de plano vazio (nunca falha silenciosa)."""
+    pair = _split_write(text)
+    if not pair and not _has_write_target(text):
+        return []                      # criação aberta ("crie um site") → rota LLM
+    return _plan_write(text)
+
+
+def _plan_write(text: str) -> list[dict]:
+    pair = _split_write(text)
+    if not pair:
+        return [{"name": "ask_detail", "args": {"question":
+                "em qual arquivo devo escrever e com que conteúdo? "
+                "(ex.: escreva ola.txt com: olá mundo)"}}]
+    path, content = pair
+    return [{"name": "write_file", "args": {"path": path, "content": content}}]
 
 
 # palavras de frase que nunca são nomes de pasta (evitar 'list_dir("pasta")')

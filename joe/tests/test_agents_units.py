@@ -118,3 +118,53 @@ def test_subagent_announce_ids_unicos():
 def test_planner_listar_extrai_pasta_correta(texto, pasta):
     plan = deterministic_plan(texto)
     assert plan == [{"name": "list_dir", "args": {"path": pasta}}]
+
+
+# ------------------------------------------------------------- planner: escrita offline (criar_arquivo)
+@pytest.mark.parametrize("texto,arquivo", [
+    ("escreva ola.txt com o texto oi", "ola.txt"),
+    ("crie um arquivo notas.txt com lista de compras", "notas.txt"),
+    ("salve em projetos/ideias.md: fazer app de receitas", "projetos/ideias.md"),
+    ("adicione na agenda.txt: reuniao sexta 14h", "agenda.txt"),
+    ("coloque em senhas.txt que o wifi e 1234", "senhas.txt"),
+    ("escreva olá mundo em hello.txt", "hello.txt"),          # forma sufixo 'em X'
+    ("bota no teste.log que rodou ok", "teste.log"),
+    ("grave isso no diario.txt: hoje foi bom", "diario.txt"), # verbo + pronome + prep
+])
+def test_planner_escrita_offline_extrai_arquivo_e_conteudo(texto, arquivo):
+    plan = deterministic_plan(texto)
+    assert plan and plan[0]["name"] == "write_file"
+    assert plan[0]["args"]["path"] == arquivo
+    assert len(plan[0]["args"]["content"]) >= 2
+
+
+@pytest.mark.parametrize("texto,intent", [
+    ("leia joe/config.py", "ler_arquivo"),                    # leitura vence 'config.py'
+    ("leia o arquivo config.py pra mim", "ler_arquivo"),      # não vira escrita por engano
+    ("abre o readme.md", "ler_arquivo"),
+    ("liste os arquivos", "listar"),                          # 'lista de compras' ≠ listar
+    ("oi joe tudo bem?", "conversar"),
+])
+def test_classificador_nao_confunde_leitura_listagem_com_escrita(texto, intent):
+    got, _ = classify_intent(texto)
+    assert got == intent, f"{texto!r}: esperado {intent}, obtido {got}"
+
+
+def test_criacao_aberta_sem_par_vira_llm_ou_pede_detalhe():
+    # sem par arquivo+conteúdo extraível → plano vazio (rota LLM), nunca falso positivo
+    assert deterministic_plan("crie um site portfolio") == []
+    # com verbo de escrita mas alvo incompleto → ask_detail (nunca falha silenciosa)
+    plan = deterministic_plan("escreva algo importante")
+    assert plan == [] or plan[0]["name"] in ("ask_detail", "write_file")
+
+
+def test_escrita_offline_end_to_end_escreve_arquivo(tmp_path, monkeypatch):
+    """Requisito do usuário: 'escreva X em Y.txt' funciona SEM LLM, de ponta a ponta."""
+    from joe.agent import Agent
+    monkeypatch.chdir(tmp_path)
+    ag = Agent()
+    resp = ag.chat("escreva ola.txt com o texto oi do joe")
+    wrote = tmp_path / "ola.txt"
+    assert wrote.exists(), f"arquivo não criado; resposta: {resp[:200]}"
+    assert "oi" in wrote.read_text().lower()
+
