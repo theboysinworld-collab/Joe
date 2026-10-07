@@ -93,10 +93,13 @@ class SelfAnalysis:
             if "error" in meta:
                 actions.append(f"extensão '{name}' com erro: {meta['error']} "
                                "(peça ao Joe: 'conserte a extensão " + name + "')")
-        # 4c. provider ativo sumiu → reseleção automática
+        # 4c. provider ativo sumiu → reseleção automática (desmarca primeiro:
+        #     se a reseleção não achar ninguém, o sistema fica em modo offline planner,
+        #     nunca com um provider morto marcado como ativo)
         from .llm import provider_registry, auto_select
         act = provider_registry.active()
         if act and not act.available():
+            provider_registry._active_id = None
             new = auto_select(self.config)
             actions.append(f"provider '{act.id}' caiu; reselecionado: {new or 'nenhum (modo offline planner)'}")
         return actions or ["nada a curar ✅"]
