@@ -67,7 +67,12 @@ for _r in (
 INTENT_PROFILES: dict[str, list[str]] = {
     "criar_arquivo": ["cria", "criar", "crie", "novo arquivo", "nova", "gera", "gerar", "gere",
                       "escreve", "escrever", "salva", "salvar", "implementa", "scaffold", "monta",
-                      "site", "portfolio", "app ", "pro jeto"],
+                      "site", "portfolio", "app ", "pro jeto",
+                      # variantes e sinônimos de escrita (gap "escreva X em Y.txt")
+                      "escreva", "escrev", "coloque", "coloca", "bota", "poe", "adiciona",
+                      "adicione", "grava", "gravar", "salve", "redija", "produza",
+                      "no arquivo", "num arquivo", "em um arquivo", "com o texto",
+                      "com o conteudo", "conteudo do tipo", "nesse arquivo"],
     "editar_codigo": ["corrige", "corrigir", "conserta", "refator", "ajusta", "edita", "bug",
                       "melhora o codigo", "muda a funcao", "troca o nome", "funcao", "codigo",
                       "programa", "script"],
@@ -107,7 +112,8 @@ _VERB_STEMS = {
     "ler_arquivo": ["leia", "le ", "ler", "lê", "abri"],
     "listar": ["liste", "list"],
     "executar": ["rode", "rod", "execut", "test", "compil", "instal", "build", "run"],
-    "criar_arquivo": ["cri", "ger", "escrev", "salv", "implement", "mont", "nov"],
+    "criar_arquivo": ["cri", "ger", "escrev", "salv", "implement", "mont", "nov",
+                      "coloque", "coloc", "bot", "grav", "redij", "adicion"],
     "editar_codigo": ["corrig", "consert", "refat", "ajust", "edit", "melhor", "troca", "mud"],
     "buscar_web": ["pesquis", "busqu", "procur", "notici"],
     "memoria": ["lembre", "lembr", "memoriz", "esquec", "anot", "guard", "decor"],

@@ -166,7 +166,7 @@ def test_chat_com_llm_dispara_refazer_do_revisor(tmp_path, monkeypatch):
     """Pipeline completo com LLM fake: resposta inicial com ERRO visível →
     revisor manda refazer → segunda chamada do loop produz a versão final."""
     ag, _ = make_agent(tmp_path)
-    monkeypatch.setattr(ag, "_classify_intent", lambda t: "editar_codigo")
+    monkeypatch.setattr("joe.agent.classify_intent", lambda t: ("editar_codigo", 0.9))
     monkeypatch.setattr(ag, "_run_offline_plan", lambda txt, intent, echo: "offline-nao-usado-aqui")
     calls = {"n": 0}
     def chat(m, t, c):
