@@ -164,7 +164,25 @@ class Agent:
             reply += f"\n\n💡 Com base nos seus hábitos desta hora, talvez você queira: {sug}. Faço?"
         self._step("conclusao", done=True, text_len=len(reply))
         self._save_history(user_text, reply)
+        self._maybe_speak(reply)          # fala ao concluir se auto_falar=true (e houver voz)
         return reply
+
+    def _maybe_speak(self, reply: str) -> None:
+        """Voz automática ao concluir (config auto_falar). Silencioso e nunca fatal:
+        sem TTS no sistema ou erro de áudio, segue apenas texto."""
+        try:
+            if not getattr(self.config, "auto_falar", False) or self.subagent:
+                return
+            tool = registry.get("speak")
+            if tool is None:
+                return
+            short = reply[:400]
+            res = tool.run(text=short)
+            txt = getattr(res, "output", "") or ""
+            if "[sem motor de voz" in txt.lower():
+                self.config.auto_falar = False   # descobre uma vez, não insiste
+        except Exception:
+            pass
 
     # ------------------------------------------------------------ loop com LLM
     def _run_tool_loop(self, echo=None) -> str:

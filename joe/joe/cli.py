@@ -208,6 +208,8 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
                     v = int(v.strip())
                 except ValueError:
                     print(f"{k} precisa ser um número inteiro"); return True
+            elif k == "auto_falar":
+                v = v.strip().lower() in ("1", "true", "sim", "on")
             setattr(cfg, k, v)
             cfg.save()
             if k == "llm_timeout":

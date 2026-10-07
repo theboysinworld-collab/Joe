@@ -75,11 +75,15 @@ def _wire_sensors(mem) -> None:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="run.py", description="Joe — inicialização completa do sistema.")
     p.add_argument("--once", metavar="TEXTO", help="envia um único pedido e encerra")
+    p.add_argument("pedido", nargs="*", metavar="TEXTO",
+                   help="pedido em linguagem natural (equivale a --once; abre a interface se vazio)")
     p.add_argument("--ide", nargs="?", const=None, metavar="ARQUIVO", help="abre o IDE após o boot")
     p.add_argument("--bench", action="store_true", help="benchmark de modelos e escolha automática")
     p.add_argument("--health", action="store_true", help="auto-análise / diagnóstico geral")
     p.add_argument("--check", action="store_true", help="valida o boot completo e encerra")
     args = p.parse_args(argv)
+    if args.pedido and not args.once:
+        args.once = " ".join(args.pedido)
 
     cfg, mem = full_boot()
 
