@@ -234,15 +234,21 @@ def _slash(line: str, agent: Agent, cfg: Config, ui: UI, mem: Memory) -> bool:
         from .auto import SelfAnalysis
         print(SelfAnalysis(cfg, mem).evolve_report())
     elif cmd == "/sub":
-        # /sub <nome> <tarefa>: se a 2ª palavra for 'para/pra', a 1ª é o nome; senão,
-        # usa a primeira palavra da frase como tarefa (menos surpresa que um nome lixo).
+        # Formas aceitas:
+        #   /sub <nome> para <tarefa>  → nome explícito (2ª palavra 'para/pra')
+        #   /sub <nome> <tarefa>       → posicional, ex.: "pesquisador resumir logs"
+        #                                (usa o MESMO extrator do planner natural)
+        #   /sub <tarefa>              → só tarefa (1ª palavra é verbo) → 'filho'
+        from .agents import _sub_name, _sub_goal
         w = rest.split(maxsplit=2)
         if len(w) >= 3 and w[1].lower() in ("para", "pra"):
             name, goal = w[0], " ".join(w[2:])
-        elif len(w) >= 2:
-            name, goal = "filho", rest
         else:
-            name, goal = "filho", rest or "explorar o workspace"
+            name = _sub_name(rest)
+            goal = rest[len(name):].strip() if rest.strip().startswith(name) and name != "filho" else _sub_goal(rest)
+            goal = goal or rest or "explorar o workspace"
+        if not goal.strip():
+            goal = rest or "explorar o workspace"
         out = spawn_subagent(name, goal)
         print(out if (out or "").strip() else f"[{name}] concluiu sem saída textual.")
         ui.graph()   # nó do filho já aparece no grafo

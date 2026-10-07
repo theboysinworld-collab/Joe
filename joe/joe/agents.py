@@ -278,6 +278,39 @@ def _first_path(text: str) -> str:
 _SUB_STOP = ("para", "pra", "que", "de", "o", "a", "um", "uma",
              "chamado", "chamada", "nome", "nomeado", "apelidado")
 
+# verbos/alvos de tarefa: se a 1ª palavra for um destes, o usuário deu só a
+# tarefa (sem nome) no formato posicional "/sub <nome> <tarefa>"
+_TASK_VERBS = {"resumir", "resuma", "liste", "buscar", "busque", "achar",
+               "ache", "procurar", "procure", "analisar", "analise", "criar", "crie",
+               "revisar", "revise", "corrigir", "corrija", "explicar", "explique",
+               "traduzir", "traduza", "salvar", "salve", "ler", "leia", "executar",
+               "execute", "rodar", "rode", "escrever", "escreva", "planejar", "planeje",
+               "organizar", "organize", "encontrar", "encontre", "pesquisar", "pesquise",
+               # imperativos/2ª pessoa de comando — se abrissem a frase, o usuário
+               # deu só a tarefa (ex. "/sub use um agente para listar…")
+               "use", "utilize", "empregue", "ative", "invoque", "delegue", "destaque",
+               # formas infinitivas correspondentes
+               "listar", "delegar", "checar"}
+
+# palavras que NUNCA são nome de sub-agente no formato posicional
+_SUB_NAME_BLACKLIST = _TASK_VERBS | set(_SUB_STOP)
+
+
+def _is_task_word(w: str) -> bool:
+    """'resumir' e 'analise' contam como tarefa; substantivos-agentes não.
+
+    Regra: imperativos pt terminam em vogal tônica ('revise', 'pesquisador'→não);
+    desinências de ação ('-ção', '-mento') e infinitivos ('-r') são tarefa,
+    mas NÃO '-dor/-tor/-sor' (agentivos: pesquisador, executor, revisor…).
+    """
+    if w in _SUB_NAME_BLACKLIST:
+        return True
+    if w.endswith(("ção", "cao", "mento")):
+        return True
+    if w.endswith("r") and len(w) > 3 and not w.endswith(("dor", "tor", "sor")):
+        return True
+    return False
+
 
 def _sub_name(text: str) -> str:
     t = _fold(text)
@@ -288,6 +321,11 @@ def _sub_name(text: str) -> str:
     m = re.search(r"(?:sub[- ]?agente|agente)\s+([a-z][\w-]+)", t)
     if m and m.group(1) not in _SUB_STOP:
         return m.group(1)
+    # forma posicional do REPL: "/sub <nome> <tarefa>" — 1ª palavra é o nome,
+    # exceto quando for só um verbo de tarefa (então cai no default 'filho')
+    words = [w for w in re.split(r"\s+", t) if w]
+    if len(words) >= 2 and not _is_task_word(words[0]):
+        return words[0]
     return "filho"
 
 
