@@ -74,9 +74,19 @@ class SelfAnalysis:
             self.memory.conn.execute("SELECT count(*) FROM facts").fetchone()
         except Exception as e:
             db = self.memory.db_path
-            db.rename(db.with_suffix(".db.bak"))
+            try:
+                self.memory.conn.close()
+            except Exception:
+                pass
+            if db.exists():
+                bak = db.with_name(db.stem + ".db.bak")
+                if bak.exists():
+                    bak.unlink()
+                db.rename(bak)
+                actions.append(f"banco corrompido ({e}); restaurado novo, antigo em {bak.name}")
+            else:
+                actions.append(f"banco ilegível ({e}); recriado limpo")
             self.memory.__init__(db)  # reabre limpo
-            actions.append(f"banco corrompido ({e}); restaurado novo, antigo em {db}.bak")
         # 4b. extensões quebradas → relatar (cura real exige editar; faremos via LLM se houver)
         from .extensions import load_all
         for name, meta in load_all().items():

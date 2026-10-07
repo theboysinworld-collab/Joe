@@ -63,8 +63,21 @@ class Memory:
         self.config = config or Config.load()
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self._init_schema()
+        try:
+            self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self._init_schema()
+        except sqlite3.DatabaseError:
+            # auto-cura na abertura: banco ilegível → backup .bak + recriação limpa
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            bak = self.db_path.with_name(self.db_path.stem + ".db.bak")
+            if bak.exists():
+                bak.unlink()
+            self.db_path.rename(bak)
+            self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self._init_schema()
         self._migrate_legacy()
 
     # ------------------------------------------------------------ schema

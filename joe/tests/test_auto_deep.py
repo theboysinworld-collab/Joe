@@ -13,7 +13,7 @@ from joe.memory import Memory
 def mem(tmp_path, monkeypatch):
     monkeypatch.setenv("JOE_HOME", str(tmp_path))
     cfg = Config.load()
-    return Memory(db=tmp_path / "joe.db", config=cfg)
+    return Memory(db_path=tmp_path / "joe.db", config=cfg)
 
 
 def _fail_events(mem, tool, n):
@@ -46,23 +46,25 @@ def test_heal_saudavel_nao_apaga_nada(mem):
 
 
 def test_heal_recupera_banco_corrompido(tmp_path, monkeypatch):
-    """Cura real: SQLite ilegível → backup .bak + recriação limpa."""
+    """Cura real: SQLite ilegível → backup .bak + recriação limpa (na abertura E no heal)."""
     monkeypatch.setenv("JOE_HOME", str(tmp_path))
     db = tmp_path / "corrompido.db"
-    m = Memory(db=db)
+    m = Memory(db_path=db)
     m.remember("antes da corrupção")
     m.conn.close()
     db.write_bytes(b"nao eh sqlite valido!!!")   # corrompe o arquivo
-    m2 = Memory(db=db)                            # reabre (sqlite tolera?) força query
+
+    # 1) cura passiva na abertura: Memory reconstrói sozinha sem explodir
+    m2 = Memory(db_path=db)
+    assert db.with_name("corrompido.db.bak").exists()   # backup preservado, nada perdido
+    m2.conn.execute("SELECT count(*) FROM facts").fetchone()  # banco novo utilizável
+
+    # 2) cura ativa via heal(): conexão viva mas tabela destruída → restaura e reporta
+    m2.conn.execute("DROP TABLE facts")
     sa = SelfAnalysis(memory=m2)
-    # garante que a consulta interna vai falhar: tabela some
-    try:
-        m2.conn.execute("DROP TABLE facts")
-    except Exception:
-        pass
     actions = sa.heal()
-    assert any("banco corrompido" in a or "restaurado" in a for a in actions), actions
-    assert db.with_suffix(".db.bak").exists()     # backup preservado, nada perdido
+    assert any("banco" in a for a in actions), actions
+    m2.conn.execute("SELECT count(*) FROM facts").fetchone()  # pós-cura: operante
 
 
 def test_evolve_report_mostra_aprendizados(mem):
