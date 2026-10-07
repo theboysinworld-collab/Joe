@@ -19,14 +19,22 @@ def isolated_home(tmp_path, monkeypatch):
 
 
 def test_remember_recall_forget():
-    r = MT.RememberTool().run("gosto de café sem açúcar", tag="preferencia")
+    """Ciclo lembrar→recordar→esquecer com marcador único.
+
+    Nota: Memory() resolve DB_PATH no momento da importação do módulo, então o
+    fixture isolado não redireciona o SQLite — usamos a memória real e um texto
+    exclusivo deste teste (idempotente via forget antes/depois).
+    """
+    marker = "zzz-marcador-exclusivo-teste-42"
+    MT.ForgetTool().run(marker)                       # limpeza idempotente
+    r = MT.RememberTool().run(f"gosto de {marker}", tag="preferencia")
     assert r.ok
-    r = MT.RecallTool().run("café")
-    assert "café" in r.output
-    r = MT.ForgetTool().run("açúcar")
+    r = MT.RecallTool().run(marker)
+    assert marker in r.output
+    r = MT.ForgetTool().run(marker)
     assert r.ok
-    r = MT.RecallTool().run("café")
-    assert "café" not in r.output or "nenhum" in r.output.lower() or r.output.strip() == ""
+    r = MT.RecallTool().run(marker)
+    assert marker not in r.output
 
 
 def test_rag_busca_vazia_nao_quebra():
@@ -35,13 +43,22 @@ def test_rag_busca_vazia_nao_quebra():
 
 
 def test_spawn_subagent_emite_eventos():
+    """Filho offline planeja a tarefa e emite eventos de agente no bus.
+
+    'rode os testes' classifica como executar → bash('os testes') é um comando
+    inexistente, então o filho devolve erro gracioso da ferramenta (ok=True com
+    texto ERRO). O que importa aqui: o ciclo de vida do sub-agente no grafo.
+    """
     from joe.bus import bus
     mark = len(bus.replay)
     r = AT.SpawnSubagentTool().run("testador", "rode os testes")
-    assert r.ok
-    topics = [e["topic"] for e in bus.replay[mark:]]
-    assert any("agent" in t or "subagent" in t or "bus" in t or True for t in topics)  # rodou sem erro
-    assert "testador" in r.output.lower() or "sub" in r.output.lower()
+    assert r.ok and isinstance(r.output, str) and r.output.strip()
+    events = bus.replay[mark:]
+    topics = [e["topic"] for e in events]
+    assert "agent.born" in topics          # nó novo no grafo ao nascer
+    assert "agent.result" in topics        # resultado volta ao pai
+    born = next(e for e in events if e["topic"] == "agent.born")
+    assert born["name"] == "testador"
 
 
 def test_create_extension_e_usavel():
