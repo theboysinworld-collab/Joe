@@ -1,8 +1,5 @@
-# Compiled and build artifacts
-*.pyc
 __pycache__/node_modules/
 .next/
 dist/
 build/
 *.log
-node_modules/

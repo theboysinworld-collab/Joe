@@ -119,6 +119,9 @@ def repl() -> int:
     cfg = Config.load()
     _boot(cfg)
     mem = Memory(config=cfg)
+    # coração proativo: sensores + tarefas periódicas em daemon (nunca bloqueia o REPL)
+    from .scheduler import start_background
+    start_background(memory=mem)
     agent = Agent(cfg, mem)
     ui = UI()
     prov = provider_registry.active()

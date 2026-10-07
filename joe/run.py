@@ -24,9 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
-def full_boot():
+def full_boot(background: bool = True):
     """Inicializa TODAS as camadas na ordem da arquitetura. Retorna (cfg, mem)."""
-    from joe.agent import Agent
     from joe.config import Config
     from joe.llm import bootstrap, auto_select
     from joe.memory import Memory
@@ -41,7 +40,36 @@ def full_boot():
     auto_select(cfg)                # 4. escolhe UM modelo ativo por vez
     bootstrap_capabilities(cfg)     # 5. sentidos/ações (voz, tela, câmera, celular, web…)
     mem = Memory(config=cfg)        # 6. memória SQLite + RAG vetorial
+    if background:                  # 7. coração proativo: scheduler daemon com sensores
+        _wire_sensors(mem)
+        from joe.scheduler import start_background
+        start_background(memory=mem)
     return cfg, mem
+
+
+def _wire_sensors(mem) -> None:
+    """Registra observadores periódicos plugáveis no scheduler (nunca falha)."""
+    from joe.scheduler import add_sensor, register
+    from joe.capabilities import capability_registry
+
+    def _notifications():
+        cap = capability_registry.get("celular")
+        if cap is None or not cap.available():
+            return None
+        out = cap.perceive(action="ler_notificacoes")
+        return out if out and "(sem notificações)" not in out else None
+
+    def _self_check():
+        from joe.auto import SelfAnalysis
+        try:
+            report = SelfAnalysis(memory=mem).analyze(last_n=50)
+            problems = report.get("problems", []) if isinstance(report, dict) else []
+            return f"auto-análise: {'; '.join(problems)}" if problems else None
+        except Exception:
+            return None
+
+    add_sensor("notificacoes", _notifications)
+    register("auto_analise", 900, _self_check)
 
 
 def main(argv=None) -> int:
