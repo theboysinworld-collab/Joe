@@ -115,7 +115,11 @@ class Memory:
     # ------------------------------------------------------------ codecs
     def _encode(self, texts: list[str]) -> list[list[float]]:
         from .llm import embed_texts  # late import: evita ciclo
-        vecs = embed_texts(texts, self.config)
+        vecs = None
+        try:
+            vecs = embed_texts(texts, self.config)
+        except Exception:
+            vecs = None   # provider em erro não pode derrubar a chamada (threads concorrentes)
         if vecs and len(vecs) == len(texts):
             return vecs
         return [_hash_vector(t) for t in texts]
@@ -201,13 +205,20 @@ class Memory:
         qvec = self._encode([query])[0]
         qt = set(_norm(query))
         hits: dict[str, dict] = {}
-        for text, tag, blob in self.conn.execute("SELECT text,tag,embedding FROM facts"):
+        # snapshot materializado sob lock de escrita: leituras concorrentes com
+        # INSERT/COMMIT de outras threads invalidavam o cursor aberto no meio da
+        # iteração → ValueError('not enough values to unpack') intermitente.
+        with self._wlock:
+            fact_rows = self.conn.execute("SELECT text,tag,embedding FROM facts").fetchall()
+            doc_rows = self.conn.execute(
+                "SELECT path,chunk,embedding FROM docs LIMIT 4000").fetchall()
+        for text, tag, blob in fact_rows:
             score = cosine(qvec, self._unvec(blob) or [])
             lex = len(qt & set(_norm(text))) / (len(qt) or 1)
             s = 0.7 * score + 0.3 * lex
             if s > 0.15:
                 hits[f"f:{text}"] = {"kind": "fato", "text": text, "tag": tag, "score": round(s, 3)}
-        for path, chunk, blob in self.conn.execute("SELECT path,chunk,embedding FROM docs LIMIT 4000"):
+        for path, chunk, blob in doc_rows:
             score = cosine(qvec, self._unvec(blob) or [])
             lex = len(qt & set(_norm(chunk))) / (len(qt) or 1)
             s = max(score, 0.7 * score + 0.3 * lex)
