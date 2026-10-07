@@ -145,7 +145,7 @@ def test_bootstrap_registra_as_oito_capacidades():
     reg = C.bootstrap_capabilities(Config.load())
     names = {c.name for c in reg.all()}
     assert {"falar", "ouvir", "ver_tela", "ver_camera", "celular",
-            "criar_imagem", "editar_video", "buscar_web"} <= names
+            "criar_imagem", "editar_video", "pesquisar_web"} <= names
     st = reg.status()
     assert all(set(d) == {"capacidade", "disponivel"} for d in st)
 
