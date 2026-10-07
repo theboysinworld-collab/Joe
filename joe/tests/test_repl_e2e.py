@@ -96,3 +96,23 @@ def test_repl_comandos_de_configuracao(fake_stdin, tmp_path, monkeypatch):
     assert "openrouter" in out          # confirmação da chave salva
     assert "qwen" in out or "modelo" in out
     assert "desconhecido" in out        # tratamento gracioso de comando inválido
+
+
+def test_main_subcomandos_cli(fake_stdin, tmp_path, monkeypatch):
+    """Cobertura dos subcomandos argv: ask/config/memory/health/bench/repl."""
+    home = str(tmp_path / "joe_home_main")
+    monkeypatch.setenv("JOE_HOME", home)
+    buf = fake_stdin(["/exit"])
+
+    assert cli.main(["ask", "oi joe"]) == 0
+    assert cli.main(["config", "model", "qwen2.5-coder:1.5b"]) == 0
+    assert cli.main(["config", "openrouter", "sk-or-abc"]) == 0
+    assert cli.main(["config", "custom_key", "valor"]) == 0
+    assert cli.main(["memory", "add", "gosto", "de", "música"]) == 0
+    assert cli.main(["memory", "list"]) == 0
+    assert cli.main(["memory", "search", "música"]) == 0
+    assert cli.main(["health"]) == 0
+    cli.main([])                        # sem args -> cai no REPL (já simulado com /exit)
+    out = buf.getvalue().lower()
+    assert "qwen" in out or "modelo" in out   # config model respondeu
+    assert "memorizado" in out or "fato" in out  # memory add respondeu
