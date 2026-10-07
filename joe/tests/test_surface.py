@@ -122,3 +122,41 @@ def test_cli_graph_live_command(monkeypatch):
     assert ok is True
     out = ui.console.file.getvalue()
     assert "grafo ao vivo" in out and "loop encerrado após 2 frames" in out
+
+
+def test_live_graph_text_fallback_loops(tmp_path, monkeypatch):
+    """Fallback sem rich.live: deve redesenhar múltiplos frames e parar só em 'q'."""
+    import joe.ui as ui
+
+    orig_panel = ui.graph_panel
+
+    def _boom():
+        raise RuntimeError("sem rich.live neste ambiente")
+
+    monkeypatch.setattr(ui, "graph_panel", _boom)
+    calls = {"n": 0}
+
+    def inp():
+        calls["n"] += 1
+        return "q" if calls["n"] >= 3 else ""
+
+    frames = ui.live_graph(console=ui.Console(file=open(tmp_path / "out.txt", "w")),
+                           max_secs=5, input_fn=inp)
+    assert frames == 3 and calls["n"] == 3
+    out = (tmp_path / "out.txt").read_text()
+    assert "usuário" in out  # desenhou o grafo em texto
+    monkeypatch.setattr(ui, "graph_panel", orig_panel)
+
+
+def test_live_graph_expires_by_time(tmp_path):
+    """max_secs expirado → loop termina por tempo (não por tecla), mesmo com ''."""
+    import joe.ui as ui
+    calls = {"n": 0}
+
+    def inp():
+        calls["n"] += 1
+        return ""  # nunca é tecla de parada agora; só o tempo encerra
+
+    frames = ui.live_graph(console=ui.Console(file=open(tmp_path / "o.txt", "w")),
+                           max_secs=0.05, input_fn=inp)
+    assert 1 <= frames <= 3 and calls["n"] < 200  # terminou rápido, sem spin infinito

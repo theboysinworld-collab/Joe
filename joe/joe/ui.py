@@ -242,10 +242,13 @@ def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float
                 key = input_fn()
                 if key in stop_keys or _expired():
                     break
+                # throttling: com input_fn presente ainda limitamos o FPS para
+                # não consumir CPU em spin-busy quando o loop só repinta
+                time.sleep(1.0 / fps)
             else:
                 time.sleep(1.0 / fps)
-                if _expired():
-                    break
+            if _expired():
+                break
         return nonlocal_frames
 
     try:
@@ -262,10 +265,11 @@ def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float
                     key = input_fn()
                     if key in stop_keys or _expired():
                         break
-                else:
-                    time.sleep(1.0 / fps)
-                    if _expired():
-                        break
+                # throttling SEMPRE (inclusive com input_fn): sem isso o loop
+                # vira spin-busy consumindo CPU quando só repinta
+                time.sleep(1.0 / fps)
+                if _expired():
+                    break
     except Exception:
         # ambiente sem TTY/rich.live → fallback texto puro com loop ao vivo
         frames = max(frames, _loop_text())

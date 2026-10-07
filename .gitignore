@@ -1,11 +1,2 @@
-# Compiled files
 __pycache__/
 *.pyc
-
-# Test artifacts
-.pytest_cache/node_modules/
-.next/
-dist/
-build/
-*.log
-node_modules/
