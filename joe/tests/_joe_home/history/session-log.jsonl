@@ -1,0 +1,1 @@
+{"user": "oi joe", "reply": "Olá! Sou o **Joe** — IDE, assistente pessoal e agente geral.\nEstou em modo offline (sem OPENAI_API_KEY), então não faço raciocínio de LLM,\nmas você pode usar comandos diretos: `/bash <cmd>`, `/read <arquivo>`, `/grep <padrão>`,\n/remember, /recall, /ide, /help. Configure uma chave para o modo agente completo."}
