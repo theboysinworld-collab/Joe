@@ -22,18 +22,42 @@ import time
 # módulos já verificados nesta sessão: evita repetir tentativas caras
 _checked: dict[str, bool] = {}
 _installed: set[str] = set()
+# log auditável das tentativas de auto-baixa (sucesso/falha/motivo)
+_deps_log: list[dict] = []
 
 
-def _pip_install(pkg: str, timeout: int = 60) -> bool:
-    """Tenta instalar `pkg` via pip do próprio interpretador. Silencioso e seguro."""
+def deps_log() -> list[dict]:
+    """Cópias das tentativas de instalação desta sessão: [{module, package, ok, reason}]."""
+    return list(_deps_log)
+
+
+def clear_caches() -> None:
+    """Zera caches/log — usado por testes e por /heal para re-verificar dependências."""
+    _checked.clear()
+    _installed.clear()
+    _deps_log.clear()
+
+
+def _pip_install(pkg: str, timeout: int = 60) -> tuple[bool, str]:
+    """Tenta instalar `pkg` via pip do próprio interpretador.
+
+    Nunca silencioso para o chamador: devolve (ok, motivo). O motivo vai para
+    o log auditável (`deps_log`) — sem isso, falhas de instalação eram
+    invisíveis e a promessa de "auto-cura de dependências" não era verificável.
+    """
     try:
         r = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", pkg],
             capture_output=True, text=True, timeout=timeout,
         )
-        return r.returncode == 0
-    except Exception:
-        return False
+        if r.returncode == 0:
+            return True, "instalado"
+        err = (r.stderr or r.stdout or "").strip().splitlines()
+        return False, f"pip exit {r.returncode}: {err[-1][:200] if err else 'sem saída'}"
+    except subprocess.TimeoutExpired:
+        return False, f"pip timeout ({timeout}s)"
+    except Exception as exc:  # nunca lança para o chamador
+        return False, f"erro: {type(exc).__name__}: {exc}"
 
 
 def ensure(module: str, package: str | None = None, *, allow_install: bool = True) -> bool:
@@ -54,7 +78,8 @@ def ensure(module: str, package: str | None = None, *, allow_install: bool = Tru
         # ausente OU quebrada (deprecated/warning virou erro, ABI errada etc.)
         if allow_install and pkg not in _installed:
             _installed.add(pkg)
-            if _pip_install(pkg):
+            ok_inst, reason = _pip_install(pkg)
+            if ok_inst:
                 importlib.invalidate_caches()
                 sys.path_importer_cache.clear()
                 # pip pode ter instalado em site-packages novo nesta sessão →
@@ -69,8 +94,11 @@ def ensure(module: str, package: str | None = None, *, allow_install: bool = Tru
                 try:
                     importlib.import_module(module)
                     ok = True
-                except Exception:
+                    reason = "instalado e importa"
+                except Exception as exc:
                     ok = False
+                    reason = f"instalado mas import falhou: {type(exc).__name__}: {exc}"
+            _deps_log.append({"module": module, "package": pkg, "ok": ok, "reason": reason})
     _checked[module] = ok
     return ok
 

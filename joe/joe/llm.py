@@ -57,7 +57,9 @@ def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: in
     Estratégia: até 3 tentativas; espera 0.5s, 1s (backoff exponencial simples).
     HTTPError 4xx não é retryável (erro do pedido em si).
     Timeout por tentativa: config.llm_timeout via `set_llm_timeout` (padrão 300s);
-    timeouts são retryáveis (modelo local pode estar carregando na primeira chamada)."""
+    timeouts são retryáveis (modelo local pode estar carregando na primeira chamada).
+    Conexão recusada NUNCA é retryável: o serviço está comprovadamente morto e
+    repetir só trava threads de busca/RAG (orçamento de latência importa)."""
     last_err: Exception | None = None
     to = timeout if timeout is not None else _LLM_TIMEOUT[0]
     for attempt in range(3):
@@ -72,8 +74,12 @@ def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: in
             if 400 <= e.code < 500:
                 raise
             last_err = e
-        except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
-            # inclui "timed out" — modelo lento ainda está trabalhando; vale tentar de novo
+        except urllib.error.URLError as e:
+            if isinstance(getattr(e, "reason", None), ConnectionRefusedError):
+                raise   # host morto: sem retry — cai no fallback determinístico na hora
+            last_err = e
+        except (TimeoutError, socket.timeout) as e:
+            # modelo lento ainda está trabalhando; vale tentar de novo
             last_err = e
         time.sleep(0.5 * (2 ** attempt))
     assert last_err is not None
@@ -201,6 +207,8 @@ class ProviderRegistry:
         self._active_id: str | None = None
 
     def register(self, provider: Provider) -> None:
+        # idempotente por id: boot único (run.py + testes + scheduler) pode chamar
+        # build_default várias vezes; duplicatas só multiplicam tentativas de rede
         self._providers[provider.id] = provider
 
     def all(self) -> list[Provider]:
@@ -265,13 +273,22 @@ def chat_completion(messages: list[dict], tools: list[dict] | None, config: Conf
 
 
 def embed_texts(texts: list[str], config: Config) -> list[list[float]] | None:
-    """Embeddings: tenta o provedor ativo, depois qualquer provider com suporte."""
+    """Embeddings: tenta o provedor ativo, depois qualquer provider com suporte.
+
+    Busca vetorial roda em caminhos sensíveis a latência (RAG por turno, e até
+    threads de teste concorrentes). Se nenhum provedor embedding responder em
+    ~3s no total, devolvemos None imediatamente — Memory._encode então cai no
+    fallback hash determinístico. Provedores locais lentos ainda funcionam no
+    chat (timeout grande), mas nunca seguram a busca."""
     candidates = [provider_registry.active()] + provider_registry.available()
-    seen = set()
+    seen: set[str] = set()
+    t0 = time.time()
     for p in candidates:
         if p is None or p.id in seen:
             continue
         seen.add(p.id)
+        if time.time() - t0 > 3.0:     # orçamento global de latência p/ embeddings
+            break
         try:
             vecs = p.embed(texts)
         except Exception:

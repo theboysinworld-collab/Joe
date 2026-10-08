@@ -63,8 +63,12 @@ class SpeechCapability(Capability):
             return "pyttsx3"
         return ""
 
-    def _voice_ok(self, engine: str) -> bool:
-        """Verifica se o pacote de voz pt do espeak está instalado; se faltar, tenta baixar."""
+    def _voice_ok(self, engine: str, _retry: bool = False) -> bool:
+        """Verifica se o pacote de voz pt do espeak está instalado; se faltar, tenta baixar.
+
+        `_retry` impede recursão infinita: a tentativa de download chama
+        _voice_ok novamente apenas uma vez para reconfirmar o estado.
+        """
         if engine not in ("espeak", "espeak-ng"):
             return True  # say/pyttsx3 gerenciam voz internamente
         import glob
@@ -72,6 +76,8 @@ class SpeechCapability(Capability):
            glob.glob("/usr/lib*/espeak*/voices/*pt*"):
             return True
         # sem rede ou sem permissão → não derruba nada; só sinaliza p/ fallback textual
+        if _retry:
+            return False   # já tentamos baixar e reconfirmar; voz pt continua ausente
         try:
             import urllib.request
             urllib.request.urlopen("https://pypi.org", timeout=3)
@@ -87,7 +93,7 @@ class SpeechCapability(Capability):
                 cmd = ["sudo", "-n"] + cmd   # -n: falha rápido se não houver senha salva
             try:
                 r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
-                if r.returncode == 0 and self._voice_ok(engine):
+                if r.returncode == 0 and self._voice_ok(engine, _retry=True):
                     return True
             except Exception:
                 pass
