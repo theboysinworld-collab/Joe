@@ -172,7 +172,9 @@ def graph_panel() -> Panel:
 
 class UI:
     def __init__(self) -> None:
-        self.console = Console()
+        # markup=False: linhas de log como "· [revisor] ..." não podem ser
+        # interpretadas como marcação rich (senão "[revisor]" vira tag e some).
+        self.console = Console(markup=False)
         # proatividade: quando o scheduler sugere algo, mostramos imediatamente
         bus.subscribe("suggest", self._on_suggest)
 

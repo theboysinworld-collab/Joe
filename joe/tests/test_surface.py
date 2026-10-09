@@ -164,3 +164,15 @@ def test_live_graph_expires_by_time(tmp_path):
     frames = ui.live_graph(console=ui.Console(file=open(tmp_path / "o.txt", "w")),
                            max_secs=0.05, input_fn=inp)
     assert 1 <= frames <= 3 and calls["n"] < 200  # terminou rápido, sem spin infinito
+
+
+def test_ui_plain_preserva_colchetes_markup():
+    """Regressão: '· [revisor] ...' não pode sumir (rich tratava como tag)."""
+    import io, contextlib
+    from joe.ui import UI
+    u = UI()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        u.plain("· [revisor] resultado coerente com a intenção")
+    out = buf.getvalue()
+    assert "[revisor]" in out and "resultado coerente" in out
