@@ -92,8 +92,11 @@ INTENT_PROFILES: dict[str, list[str]] = {
                "mostra a tela"],
     "celular": ["celular", "android", "termux", "notificacao", "sms", "whatsapp", "abrir app",
                 "abre o app", "liga para", "instagram", "telegram", "aplicativo", "app"],
-    "conversar": ["oi", "ola", "bom dia", "boa noite", "quem e voce", "obrigado",
-                  "valeu", "legal", "e ai", "tudo bem"],
+    "conversar": ["oi", "ola", "opa", "eai", "e ai", "salve", "hey", "hello", "hi",
+                  "bom dia", "boa tarde", "boa noite", "quem e voce", "o que voce faz",
+                  "como voce esta", "como vai voce", "tudo bem", "tudo bom", "beleza",
+                  "obrigado", "obrigada", "valeu", "show", "legal", "voce e muito",
+                  "gostei de voce", "me ajuda"],
     "listar": ["liste", "listar", "lista de", "lista os", "quais arquivos", "quais sao os arquivos",
                "o que tem na pasta", "conteudo da pasta", "diretorios", "arquivos do",
                # variantes coloquiais (gap "me mostre os arquivos" ≠ ler arquivo único)
@@ -216,9 +219,89 @@ def deterministic_plan(text: str) -> list[dict]:
         "criar_arquivo": lambda: _plan_create(text),  # escrita offline quando há par arquivo+conteúdo
         "editar_codigo": lambda: [],
         "planejar": lambda: [],
-        "conversar": lambda: [],
+        # saudações/agrafecimentos PUROS têm resposta local determinística (sem LLM).
+        # Qualquer outra variante de "conversar" devolve [] — inclusive frases com
+        # sinal de tarefa ('me ajuda com o grafo', 'conta uma piada'), que PRECISAM
+        # chegar vazio para a auto-expansão do Agent agir via registry.names().
+        # (HARD RULE: gate próprio aqui quebrava a auto-expansão ao engolir o [])
+        "conversar": lambda: ([{"name": "greeting", "args": {"text": text}}]
+                              if _is_pure_social(_fold(text)) else []),
     }
     return plans.get(intent, lambda: [])()
+
+
+def _norm_words(s: str) -> list[str]:
+    import re as _re
+    return [w for w in _re.findall(r"[\wÀ-ÿ]+", _fold(s)) if len(w) > 2]
+
+
+# ------------------------------------------------------------ saudação/resposta local sem LLM
+_GREET_KEYS = ("oi", "ola", "opa", "eai", "e ai", "salve", "hey", "hello", "hi",
+               "bom dia", "boa tarde", "boa noite", "tudo bem", "tudo bom", "beleza")
+_THANKS_KEYS = ("obrigado", "obrigada", "valeu", "show", "legal", "gostei")
+
+
+def _is_greeting(folded: str) -> bool:
+    toks = folded.split()
+    return any(k in toks for k in _GREET_KEYS) or folded.strip() in _GREET_KEYS
+
+
+# palavras que SEMPRE indicam tarefa executável — nunca são "social puro"
+_SOCIAL_BLOCK = ("voce", "ajuda", "faz", "piada", "conta", "explica", "consegue",
+                 "pode", "sabe", "como", "porque", "quando", "quanto")
+
+
+def _is_pure_social(folded: str) -> bool:
+    """Saudação/agradecimento PURO: só interjeições sociais, nada de pergunta/tarefa.
+
+    'oi joe' → True (resposta local). 'me ajuda com o grafo' / 'o que voce faz' →
+    False, para a auto-expansão do Agent (via registry) ou o fallback instruído
+    tratarem — gate aqui NUNCA pode engolir frases acionáveis."""
+    t = folded.strip()
+    if not t:
+        return False
+    if any(w in t.split() for w in _SOCIAL_BLOCK):
+        return False
+    return _is_greeting(t) or any(k in t.split() for k in _THANKS_KEYS)
+
+
+def greeting_reply(text: str, memory=None) -> str:
+    """Resposta offline honesta para saudação/agradecimento/pergunta sobre o Joe.
+
+    Usa memória do usuário (nome preferido) quando disponível — mostra ao usuário
+    que o sistema lembra dele mesmo sem LLM."""
+    t = _fold(text)
+    nome = ""
+    try:
+        if memory is not None:
+            hits = memory.search("nome usuario como me chamo")   # API real: k=6 default
+            for h in hits:
+                fat = h.get("text", "") if isinstance(h, dict) else str(h)
+                if "nome" in _fold(fat):
+                    import re as _re
+                    m = _re.search(r"nome\s+(?:e|é|:)\s+([\wáéíóúãõç-]+)", fat, _re.I)
+                    if m:
+                        nome = m.group(1)
+                    break
+    except Exception:
+        pass
+    quem = ["quem e voce", "o que voce faz", "como voce esta", "como vai voce",
+            "me ajuda", "voce e muito"]
+    if any(k in t for k in quem):
+        return ("Sou o **Joe**: IDE + assistente pessoal + agente geral em um só run.py.\n"
+                "Executo comandos, leio/edito arquivos, lembro fatos (SQLite+RAG), vejo tela/câmera, "
+                "falo por voz, busco na web, crio sub-agentes e extensões — com ou sem LLM ativo.")
+    if any(k in t for k in _THANKS_KEYS) and not _is_greeting(t):
+        base = f"Disponha{', ' + nome if nome else ''}! Precisa de mais alguma coisa?"
+        return base
+    if _is_greeting(t):
+        ola = f"Olá{', ' + nome if nome else ''}! " if nome or True else ""
+        return (ola + "Sou o Joe — seu IDE, assistente e agente geral.\n"
+                "Posso: executar comandos, ler/editar arquivos, lembrar de você (lembro sim!), "
+                "pesquisar na web, ver a tela/câmera, falar por voz e criar agentes/extensões.\n"
+                "Experimente: `me mostre os arquivos` · `lembre-se que meu nome é X` · `/graph live`.")
+    return ("Entendi como conversa. Sem LLM ativo respondo direto; diga o que fazer e eu executo "
+            "(ex.: `rode os testes`, `leia joe/config.py`) ou ative um modelo com `/config openrouter <chave>` / ollama local.")
 
 
 def _plan_read(text: str) -> list[dict]:

@@ -165,7 +165,28 @@ class ShowGraphTool(Tool):
         return ToolResult(output=graph_text())
 
 
+class GreetingTool(Tool):
+    """Resposta local determinística para saudação/agradecimento/'quem é você' — sem LLM.
+
+    Consulta a memória do usuário: se ele já disse o nome, o Joe cumprimenta pelo nome
+    (prova viva de que 'lembra de tudo' funciona mesmo offline)."""
+    name = "greeting"
+    description = ("Responde saudações e perguntas sobre o assistente usando apenas a base "
+                   "determinística + memória persistente (não requer LLM). Args: text.")
+    parameters = {"type": "object", "properties": {
+        "text": {"type": "string"}}, "required": ["text"]}
+
+    def run(self, text: str) -> ToolResult:
+        from ..agents import greeting_reply
+        try:
+            from ..memory import Memory
+            mem = Memory()
+        except Exception:
+            mem = None
+        return ToolResult(output=greeting_reply(text, memory=mem))
+
+
 for t in (SpawnSubagentTool(), CreateExtensionTool(), SelfUpdateTool(),
           HealthCheckTool(), LearnTool(), PredictNeedsTool(), ShowGraphTool(),
-          AskDetailTool()):
+          AskDetailTool(), GreetingTool()):
     registry.register(t)
