@@ -1,0 +1,287 @@
+"""Interface do Joe — leve, minimalista, com o GRAFO de agentes ao centro.
+
+Layout (rich):
+┌ topo: status compacto (provider ativo, modelo, #tools, humor) ────────────┐
+│            ░░ ANEL DE AGENTES (nós em círculo, 35% opacidade) ░░           │
+│         usuário → intenção → planejador ⇄ executor → revisor → conclusão   │
+│      sub-agentes nascem como novos nós; arestas = handoffs reais do bus    │
+│  log abaixo: pensamentos/decisões/ferramentas/memória de cada agente       │
+└ prompt essencial: "joe ❯" ─────────────────────────────────────────────────┘
+
+A UI NÃO conhece o agente: ela só assina o EventBus e desenha o replay.
+`render_graph()` é pura (string) → testável sem terminal.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import dataclass, field
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+from .bus import bus
+
+PIPELINE = ["usuário", "intenção", "planejador", "executor", "revisor", "conclusão"]
+
+
+@dataclass
+class GraphState:
+    nodes: dict[str, dict] = field(default_factory=dict)     # id -> {label, last_note, ts}
+    edges: list[tuple[str, str]] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)     # proatividade (cooldown/limite)
+
+    def touch(self, nid: str, note: str = "") -> None:
+        # nota vazia não apaga a anterior (decisões do executor chegam via 'note=')
+        if note:
+            self.nodes[nid] = {"label": nid, "note": note[:60], "ts": time.time()}
+        elif nid not in self.nodes:
+            self.nodes[nid] = {"label": nid, "note": "", "ts": time.time()}
+        else:
+            self.nodes[nid]["ts"] = time.time()
+
+    def add_suggestion(self, text: str) -> None:
+        """Enfileira sugestão proativa; deduplica e limita a 5 recentes."""
+        t = str(text).strip()
+        if not t or t in self.suggestions:
+            return
+        self.suggestions.append(t)
+        self.suggestions = self.suggestions[-5:]
+
+
+STATE = GraphState()
+for n in PIPELINE:
+    STATE.touch(n)
+
+
+# ---------------------------------------------------------------- UI grafo (nós = papéis do pipeline)
+def _node_id(role: str, agent_name: str) -> str:
+    """Nó canônico por papel do pipeline; sub-agentes ganham nó próprio."""
+    return _ROLE_MAP.get(role, agent_name.lower())
+
+
+def _listener(ev: dict) -> None:
+    t, p = ev["topic"], ev
+    if t == "agent.step":
+        role = p.get("role", "?")
+        nid = _node_id(role, p.get("name", "Joe"))
+        # nota do grafo: decisão/resultado real (note), não só o rótulo do papel —
+        # assim executor/revisor/conclusão mostram "o que pensaram" no grafo.
+        detail = p.get("note") or p.get("intent") or p.get("verdict") or p.get("mode") or ""
+        STATE.touch(nid, f"{role}: {detail}")
+        # aresta real do pipeline: papel anterior → papel atual (nunca crasha)
+        seq = [_ROLE_MAP.get(r, r) for r in _PIPELINE_ROLES]
+        cur = _ROLE_MAP.get(role, role)
+        if cur in seq and seq.index(cur) > 0:
+            STATE.edges.append((seq[seq.index(cur) - 1], cur))
+    elif t == "agent.thought":
+        STATE.touch(p.get("agent", "joe"), f"💭 {p['thought'][:50]}")
+    elif t == "agent.tool":
+        STATE.touch(p.get("agent", "joe"), f"⚙ {p['tool']}")
+    elif t == "agent.memory":
+        STATE.touch(p.get("agent", "joe"), f"🧠 {p['saved'][:40]}")
+    elif t == "agent.born":
+        STATE.touch(p["name"].lower(), f"sub-agente: {p['goal'][:40]}")
+    elif t == "agent.handoff":
+        STATE.edges.append((p["frm"], p["to"]))
+    elif t == "ext.tool_added":
+        STATE.touch("extensões", f"+ {p['tool']}")
+    elif t == "suggest":
+        # proatividade do scheduler: intenções recorrentes nesta hora
+        for it in p.get("items", []):
+            STATE.add_suggestion(str(it))
+    elif t.startswith("sense."):
+        # sensores do scheduler viram nós vivos no grafo
+        STATE.touch(p["topic"].split(".", 1)[1], f"👁 {str(p.get('observation', ''))[:40]}")
+
+
+_ROLE_MAP = {"intencao": "intenção", "planejador": "planejador", "executor": "executor",
+             "revisor": "revisor", "conclusao": "conclusão"}
+# ordem canônica dos papéis emitidos pelo Agent._step (sem acentos)
+_PIPELINE_ROLES = ("intencao", "planejador", "executor", "revisor", "conclusao")
+bus.subscribe("agent", _listener)
+bus.subscribe("ext", _listener)
+bus.subscribe("suggest", _listener)   # proatividade do scheduler → grafo
+bus.subscribe("sense.", _listener)     # sensores do scheduler → nós vivos
+
+
+def render_graph(width: int = 72, opacity_pct: int = 35) -> Text:
+    """Desenha os nós num anel central translúcido (vibe n8n) + arestas pontilhadas."""
+    ids = list(STATE.nodes)
+    canvas = [[" "] * width for _ in range(9)]
+    cx, cy = width // 2, 4
+    rx, ry = min(width // 2 - 8, 26), 3
+
+    def put(x: int, y: int, s: str):
+        x = max(1, min(width - len(s) - 1, x))
+        y = max(0, min(8, y))
+        canvas[y][x:x + len(s)] = list(s)
+
+    positions = {}
+    n = max(len(ids), 1)
+    # rótulo curto do nó (evita sobreposição em anéis apertados)
+    labels = {nid: (nid[:10] + "…" if len(nid) > 10 else nid) for nid in ids}
+    for i, nid in enumerate(ids):
+        ang = 2 * math.pi * i / n - math.pi / 2
+        x = int(cx + rx * math.cos(ang))
+        y = int(cy + ry * round(math.sin(ang), 2) * 2)
+        positions[nid] = (x, y)
+    # arestas: linha pontilhada entre nós conectados (últimas 12, sem duplicatas)
+    seen_edges = set()
+    for a, b in STATE.edges[-12:]:
+        if (a, b) in seen_edges or a not in positions or b not in positions:
+            continue
+        seen_edges.add((a, b))
+        (x1, y1), (x2, y2) = positions[a], positions[b]
+        steps = max(abs(x2 - x1), abs(y2 - y1), 1)
+        for k in range(1, steps):
+            px = max(0, min(width - 1, int(x1 + (x2 - x1) * k / steps)))
+            py = max(0, min(len(canvas) - 1, int(y1 + (y2 - y1) * k / steps)))
+            if canvas[py][px] == " ":
+                canvas[py][px] = "·"
+    for nid, (x, y) in positions.items():
+        put(x - len(labels[nid]) // 2, y, f"⟨{labels[nid]}⟩")
+    out = Text()
+    alpha = 0.25 + 0.75 * (opacity_pct / 100)
+    dim = alpha < 0.8
+    for row in canvas:
+        line = "".join(row).rstrip()
+        style = "dim italic" if dim else ""
+        out.append(line + "\n", style=style)
+    legend = ", ".join(f"{nid}[{STATE.nodes[nid]['note'][:28]}]" if STATE.nodes[nid]["note"] else nid
+                       for nid in ids[-8:])
+    out.append(f"\n  · rede: {legend}", style="cyan dim")
+    if STATE.suggestions:
+        # proatividade visível ao centro da interface (linha própria, discreta)
+        sug = "  •  ".join(STATE.suggestions[-3:])
+        out.append(f"\n  ✦ sugerido: {sug}", style="yellow")
+    return out
+
+
+def graph_text(width: int = 72) -> str:
+    """Versão texto puro do grafo (para ferramentas/CLI sem rich)."""
+    return render_graph(width).plain
+
+
+def graph_panel() -> Panel:
+    return Panel(render_graph(), title="☉ agentes — pensamento · criação · decisão · memória",
+                 border_style="cyan", padding=(0, 1))
+
+
+class UI:
+    def __init__(self) -> None:
+        # markup=False: linhas de log como "· [revisor] ..." não podem ser
+        # interpretadas como marcação rich (senão "[revisor]" vira tag e some).
+        self.console = Console(markup=False)
+        # proatividade: quando o scheduler sugere algo, mostramos imediatamente
+        bus.subscribe("suggest", self._on_suggest)
+
+    def _on_suggest(self, ev: dict) -> None:
+        items = ev.get("items") or []
+        if items:
+            try:
+                self.console.print(Text(f"✦ joe sugere: {', '.join(map(str, items))}", style="yellow"))
+            except Exception:
+                pass
+
+    def header(self, provider: str, model: str, tools: int, mode: str) -> None:
+        # NOTE: kwargs de layout pertencem ao Panel, não a Console.print()
+        self.console.print(Panel(
+            Text.assemble(("joe ", "bold green"), (f"· {provider or 'offline-planner'}", "cyan"),
+                          (f" · {model}" if model else "", ""), (f" · {tools} ferramentas", "dim"),
+                          (f" · {mode}", "magenta")),
+            border_style="blue", padding=(0, 1)))
+
+    def graph(self) -> None:
+        self.console.print(graph_panel())
+
+    def tool_line(self, s: str) -> None:
+        self.console.print(Text(s, style="dim"))
+
+    def answer(self, s: str) -> None:
+        self.console.print(Panel(s, border_style="green", title="✔ conclusão"))
+
+    def error(self, s: str) -> None:
+        self.console.print(Text(f"✗ {s}", style="red"))
+
+    def plain(self, s: str) -> None:
+        self.console.print(s)
+
+
+# ---------------------------------------------------------------- loop ao vivo
+def live_graph(console: Console | None = None, fps: float = 4.0, max_secs: float = 0.0,
+               input_fn=None, stop_keys: tuple[str, ...] = ("q",)) -> int:
+    """Redesenha o grafo do centro da interface continuamente (vibe n8n ao vivo).
+
+    - assina o EventBus (via STATE já atualizado pelo listener módulo) e repinta;
+    - sai quando o usuário digita uma tecla de parada ("q") ou atinge ``max_secs``
+      (0 = sem limite); Enter/linha em branco apenas repintam o frame;
+    - nunca crasha por terminal pequeno / ausência de input: cai em modo texto.
+
+    Retorna quantos frames foram desenhados (útil para testes).
+    """
+    con = console or Console()
+    if input_fn is None:
+        try:
+            import sys as _sys
+            input_fn = (lambda: _sys.stdin.readline().rstrip("\n")) if not _sys.stdin.isatty() else None
+        except Exception:
+            input_fn = None
+    frames = 0
+    t0 = time.time()
+
+    def _expired() -> bool:
+        return bool(max_secs) and (time.time() - t0 >= max_secs)
+
+    def _loop_text() -> int:
+        """Fallback determinístico (sem rich.live): redesenha em modo texto."""
+        nonlocal_frames = 0
+        clear = getattr(con, "clear", None)
+        while True:
+            nonlocal_frames += 1
+            if callable(clear):
+                try:
+                    clear()
+                except Exception:
+                    pass
+            con.print(graph_text())
+            if _expired():
+                break
+            if input_fn is not None:
+                key = input_fn()
+                if key in stop_keys or _expired():
+                    break
+                # throttling: com input_fn presente ainda limitamos o FPS para
+                # não consumir CPU em spin-busy quando o loop só repinta
+                time.sleep(1.0 / fps)
+            else:
+                time.sleep(1.0 / fps)
+            if _expired():
+                break
+        return nonlocal_frames
+
+    try:
+        from rich.live import Live
+        with Live(graph_panel(), console=con, refresh_per_second=fps,
+                  transient=False, auto_refresh=True) as lv:
+            while True:
+                frames += 1
+                # repinta a partir do estado global (listeners alimentam STATE)
+                lv.update(graph_panel())
+                if _expired():
+                    break
+                if input_fn is not None:
+                    key = input_fn()
+                    if key in stop_keys or _expired():
+                        break
+                # throttling SEMPRE (inclusive com input_fn): sem isso o loop
+                # vira spin-busy consumindo CPU quando só repinta
+                time.sleep(1.0 / fps)
+                if _expired():
+                    break
+    except Exception:
+        # ambiente sem TTY/rich.live → fallback texto puro com loop ao vivo
+        frames = max(frames, _loop_text())
+    return frames

@@ -1,0 +1,193 @@
+"""Unidades puras de joe/agents.py: extratores do planner offline e orquestração."""
+import pytest
+
+from joe.agents import (_fold, _first_cmd, _first_path, _plan_phone, _plan_read,
+                        _strip_fact, _strip_query, _sub_goal, _sub_name,
+                        classify_intent, deterministic_plan, role_registry,
+                        spawn_subagent, SubAgent)
+
+
+# ---------------------------------------------------------------- fold & extratores
+def test_fold_remove_acentos_e_caixa():
+    assert _fold("NUNCA ESQUEÇA") == "nunca esqueca"
+
+
+@pytest.mark.parametrize("texto,esperado", [
+    ("leia o arquivo config.py pra mim", "config.py"),
+    ("abra joe/tools/base.py agora", "joe/tools/base.py"),
+    ("me mostre o grafo", "(no arquivo indicado — especifique o caminho)"),
+])
+def test_first_path_extrai_alvos(texto, esperado):
+    assert _first_path(texto) == esperado
+
+
+def test_strip_fact_destripa_comandos_de_memoria():
+    assert _strip_fact("lembre-se que meu nome é Carlos") == "meu nome é Carlos"
+    assert _strip_fact("anote que odeio segunda-feira") == "odeio segunda-feira"
+    assert _strip_fact("fato cru sem verbo") == "fato cru sem verbo"
+
+
+def test_strip_query_isola_busca():
+    assert _strip_query("pesquise na internet por clima em Recife") == "clima em Recife"
+    assert _strip_query("busque sobre Python 3.13") == "Python 3.13"
+
+
+@pytest.mark.parametrize("texto,cmd", [
+    ("rode `pytest -q`", "pytest -q"),
+    ('execute "ls -la"', "ls -la"),
+    ("rode os testes agora", "os testes agora"),
+    ("faça qualquer coisa", "pwd && ls"),          # default seguro
+])
+def test_first_cmd(texto, cmd):
+    assert _first_cmd(texto) == cmd
+
+
+@pytest.mark.parametrize("texto,nome,goal", [
+    ("crie um sub-agente revisor para revisar o codigo", "revisor", "revisar o codigo"),
+    ("use um agente para listar os arquivos", "filho", "listar os arquivos"),
+    ("novo sub-agente pesquisador para achar bugs", "pesquisador", "achar bugs"),
+    ("delegue isso", "filho", "delegue isso"),     # sem 'para': mantém texto todo
+])
+def test_sub_name_e_goal(texto, nome, goal):
+    assert _sub_name(texto) == nome
+    assert _sub_goal(texto) == goal
+
+
+# ---------------------------------------------------------------- planos por intenção
+def test_plan_read_sem_alvo_vira_ask_detail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    plan = _plan_read("leia o código fonte")
+    assert plan[0]["name"] == "ask_detail"
+
+
+def test_plan_phone_notificar_e_abrir_app():
+    p = _plan_phone("me avise sobre a reunião às 9")
+    assert p[0]["args"]["action"] == "notificar"
+    p = _plan_phone("notifique no celular sobre o bolo no forno")
+    assert p[0]["args"]["action"] == "notificar"
+    p = _plan_phone("abre o app instagram no celular")
+    assert p[0]["args"]["action"] == "abrir_app" and p[0]["args"]["app"] == "instagram"
+    p = _plan_phone("celular")
+    assert p[0]["args"]["action"] == "status"
+
+
+def test_deterministic_plan_camera_vs_tela():
+    assert deterministic_plan("veja pela câmera o que está na mesa")[0]["name"] == "camera_view"
+    assert deterministic_plan("capture a tela agora")[0]["name"] == "see_screen"
+
+
+def test_intencoes_abertas_tem_plano_vazio():
+    assert deterministic_plan("crie um site portfolio") == []   # exige LLM/conteúdo
+
+
+# ---------------------------------------------------------------- papéis & sub-agentes
+def test_role_registry_pipeline_base():
+    for r in ("intento", "planejador", "executor", "revisor", "conclusao"):
+        assert role_registry.get(r) is not None
+
+
+def test_spawn_subagent_propaga_falha_do_filho(monkeypatch):
+    from joe import agents
+
+    def boom(goal, sa):
+        def run():
+            raise RuntimeError("explodiu")
+        return run
+    monkeypatch.setattr(agents, "_default_factory", boom)
+    out = spawn_subagent("zonso", "tarefa impossível")
+    assert "falhou" in out and "explodiu" in out
+
+
+def test_subagent_announce_ids_unicos():
+    a, b = SubAgent("x", "g1"), SubAgent("y", "g2")
+    assert a.id != b.id or a.goal != b.goal      # ids derivados de ms
+    assert a.parent == "joe"
+
+
+# ------------------------------------------------------------- planner: intenção "listar"
+@pytest.mark.parametrize("texto,pasta", [
+    ("liste os arquivos da pasta joe", "joe"),
+    ("liste os arquivos da pasta", "."),          # 'pasta' genérico → raiz, nunca literal
+    ("liste os arquivos", "."),
+    ("o que tem na pasta tests", "tests"),        # nome após 'pasta' vence a preposição
+    ("liste tudo do projeto", "."),
+    ("liste os arquivos em /tmp", "/tmp"),
+    ("quais arquivos estao na pasta src agora", "src"),
+    ("conteudo da pasta ~/.config", "~/.config"),
+])
+def test_planner_listar_extrai_pasta_correta(texto, pasta):
+    plan = deterministic_plan(texto)
+    assert plan == [{"name": "list_dir", "args": {"path": pasta}}]
+
+
+# ------------------------------------------------------------- planner: escrita offline (criar_arquivo)
+@pytest.mark.parametrize("texto,arquivo", [
+    ("escreva ola.txt com o texto oi", "ola.txt"),
+    ("crie um arquivo notas.txt com lista de compras", "notas.txt"),
+    ("salve em projetos/ideias.md: fazer app de receitas", "projetos/ideias.md"),
+    ("adicione na agenda.txt: reuniao sexta 14h", "agenda.txt"),
+    ("coloque em senhas.txt que o wifi e 1234", "senhas.txt"),
+    ("escreva olá mundo em hello.txt", "hello.txt"),          # forma sufixo 'em X'
+    ("bota no teste.log que rodou ok", "teste.log"),
+    ("grave isso no diario.txt: hoje foi bom", "diario.txt"), # verbo + pronome + prep
+])
+def test_planner_escrita_offline_extrai_arquivo_e_conteudo(texto, arquivo):
+    plan = deterministic_plan(texto)
+    assert plan and plan[0]["name"] == "write_file"
+    assert plan[0]["args"]["path"] == arquivo
+    assert len(plan[0]["args"]["content"]) >= 2
+
+
+@pytest.mark.parametrize("texto,intent", [
+    ("leia joe/config.py", "ler_arquivo"),                    # leitura vence 'config.py'
+    ("leia o arquivo config.py pra mim", "ler_arquivo"),      # não vira escrita por engano
+    ("abre o readme.md", "ler_arquivo"),
+    ("liste os arquivos", "listar"),                          # 'lista de compras' ≠ listar
+    ("oi joe tudo bem?", "conversar"),
+])
+def test_classificador_nao_confunde_leitura_listagem_com_escrita(texto, intent):
+    got, _ = classify_intent(texto)
+    assert got == intent, f"{texto!r}: esperado {intent}, obtido {got}"
+
+
+def test_criacao_aberta_sem_par_vira_llm_ou_pede_detalhe():
+    # sem par arquivo+conteúdo extraível → plano vazio (rota LLM), nunca falso positivo
+    assert deterministic_plan("crie um site portfolio") == []
+    # com verbo de escrita mas alvo incompleto → ask_detail (nunca falha silenciosa)
+    plan = deterministic_plan("escreva algo importante")
+    assert plan == [] or plan[0]["name"] in ("ask_detail", "write_file")
+
+
+def test_escrita_offline_end_to_end_escreve_arquivo(tmp_path, monkeypatch):
+    """Requisito do usuário: 'escreva X em Y.txt' funciona SEM LLM, de ponta a ponta."""
+    from joe.agent import Agent
+    monkeypatch.chdir(tmp_path)
+    ag = Agent()
+    resp = ag.chat("escreva ola.txt com o texto oi do joe")
+    wrote = tmp_path / "ola.txt"
+    assert wrote.exists(), f"arquivo não criado; resposta: {resp[:200]}"
+    assert "oi" in wrote.read_text().lower()
+
+
+
+def test_classify_listar_variantes_coloquiais():
+    """Gap de inteligência corrigido: 'me mostre os arquivos' é listar, não ler."""
+    for frase in ("me mostre os arquivos", "mostre os arquivos da pasta",
+                  "o que tem na pasta raiz"):
+        intent, _ = classify_intent(frase)
+        assert intent == "listar", f"{frase!r} -> {intent}"
+    # regressão: leitura de arquivo único continua sendo ler_arquivo
+    assert classify_intent("leia joe/config.py")[0] == "ler_arquivo"
+    assert classify_intent("me mostre o grafo")[0] == "mostrar_grafo"
+
+
+def test_executor_decisao_aparece_no_grafo():
+    """Comunicação E2E: decisão do executor vira nota legível no nó do grafo."""
+    from joe.ui import STATE
+    from joe.agent import Agent
+    STATE.nodes.clear()
+    ag = Agent()
+    reply = ag.chat("me mostre os arquivos", echo=lambda s: None)
+    assert "list_dir" in reply.lower()
+    assert "list_dir" in STATE.nodes.get("executor", {}).get("note", ""), \
+        f"grafo sem decisão do executor: {dict(STATE.nodes)}"

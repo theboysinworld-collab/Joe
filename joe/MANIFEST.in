@@ -1,0 +1,6 @@
+include README.md
+include run.py
+include pyproject.toml
+recursive-include joe *.py
+recursive-include tests *.py
+global-exclude __pycache__ *.pyc

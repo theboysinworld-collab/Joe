@@ -1,0 +1,13 @@
+# artefatos de teste/empacotamento
+.coverage
+.pytest_cache/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+*.log
+node_modules/
+
+# estado gerado por testes (JOE_HOME de teste)
+tests/_joe_home/
