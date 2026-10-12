@@ -25,11 +25,16 @@ class OcrTool(Tool):
     def run(self, path: str) -> ToolResult:
         if not Path(path).exists():
             return ToolResult(ok=False, output=f"não existe: {path}")
+        from ..deps import ensure, ensure_bin
+        if not shutil.which("tesseract"):
+            ensure_bin("tesseract", timeout=180)
         if shutil.which("tesseract"):
             r = subprocess.run(["tesseract", path, "-"], capture_output=True, text=True, check=False)
             if r.returncode == 0 and r.stdout.strip():
                 return ToolResult(output=r.stdout.strip()[:4000])
         try:
+            if not ensure("pytesseract", "pytesseract") or not ensure("PIL", "pillow"):
+                raise ImportError("dependências Python de OCR indisponíveis")
             import pytesseract
             from PIL import Image
             return ToolResult(output=pytesseract.image_to_string(Image.open(path))[:4000])

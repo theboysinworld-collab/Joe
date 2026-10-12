@@ -81,11 +81,17 @@ def main(argv=None) -> int:
     p.add_argument("--bench", action="store_true", help="benchmark de modelos e escolha automática")
     p.add_argument("--health", action="store_true", help="auto-análise / diagnóstico geral")
     p.add_argument("--check", action="store_true", help="valida o boot completo e encerra")
+    p.add_argument("--web", nargs="?", const=8765, type=int, metavar="PORT",
+                   help="abre a interface no navegador (porta padrão: 8765)")
     args = p.parse_args(argv)
     if args.pedido and not args.once:
         args.once = " ".join(args.pedido)
 
     cfg, mem = full_boot()
+
+    if args.web is not None:
+        from joe.web import serve_web
+        return serve_web(cfg, mem, port=args.web)
 
     if args.check:
         from joe.tools.base import registry

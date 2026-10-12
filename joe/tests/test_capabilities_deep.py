@@ -1,5 +1,7 @@
 """Cobertura profunda das capacidades: caminhos de fallback e extração."""
 import subprocess
+import wave
+from types import SimpleNamespace
 from joe import capabilities as cap
 
 
@@ -66,6 +68,32 @@ def test_speech_espeak(monkeypatch):
     assert calls[0][0] == "espeak"
 
 
+def test_piper_synth_wav_quando_player_ausente(monkeypatch, tmp_path):
+    output = tmp_path / "fala.wav"
+
+    class FakeVoice:
+        @staticmethod
+        def load(path):
+            return FakeVoice()
+
+        def synthesize_wav(self, text, wav_file):
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(22050)
+            wav_file.writeframes(b"\0\0" * 2205)
+
+    monkeypatch.setitem(__import__("sys").modules, "piper", SimpleNamespace(PiperVoice=FakeVoice))
+    monkeypatch.setattr(cap.shutil, "which", lambda _: None)
+    monkeypatch.setattr(cap.SpeechCapability, "_piper_voice_path", lambda self: tmp_path / "voice.onnx")
+
+    result = cap.SpeechCapability()._synthesize_piper("olá", str(output))
+
+    with wave.open(str(output), "rb") as audio:
+        assert audio.getnframes() == 2205
+        assert audio.getframerate() == 22050
+    assert "reprodução indisponível" in result
+
+
 def test_hearing_unavailable_message(monkeypatch):
     monkeypatch.setattr(cap.shutil, "which", lambda n: None)
     c = cap.HearingCapability()
@@ -106,10 +134,27 @@ def test_screen_none_available(monkeypatch):
 def test_camera_ffmpeg(monkeypatch, tmp_path):
     jpg = tmp_path / "cam.jpg"
     monkeypatch.setattr(cap.shutil, "which", lambda n: "/x/ffmpeg" if n == "ffmpeg" else None)
+    monkeypatch.setattr(cap.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cap.Path, "glob", lambda self, pattern: [cap.Path("/dev/video0")] if str(self) == "/dev" else [])
     calls = _stub_run(monkeypatch, create_file=jpg)
+    assert cap.CameraCapability().available()
     out = cap.CameraCapability().perceive(out_path=str(jpg))
     assert "frame da câmera salvo" in out
     assert calls[0][0] == "ffmpeg"
+
+
+def test_camera_ffmpeg_sem_dispositivo_nao_anuncia_capacidade(monkeypatch):
+    monkeypatch.setattr(cap.shutil, "which", lambda n: "/x/ffmpeg" if n == "ffmpeg" else None)
+    monkeypatch.setattr(cap.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cap.Path, "glob", lambda self, pattern: [])
+    assert not cap.CameraCapability().available()
+    assert "câmera indisponível" in cap.CameraCapability().perceive()
+
+
+def test_camera_ffmpeg_nao_anuncia_backend_nao_implementado(monkeypatch):
+    monkeypatch.setattr(cap.shutil, "which", lambda n: "/x/ffmpeg" if n == "ffmpeg" else None)
+    monkeypatch.setattr(cap.platform, "system", lambda: "Windows")
+    assert not cap.CameraCapability().available()
 
 
 def test_phone_actions(monkeypatch):

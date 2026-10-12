@@ -15,8 +15,13 @@ python3 run.py --ide [arquivo]        # mini-IDE de terminal (buffers, :edit, :g
 python3 run.py --bench                # benchmark dos modelos detectados (ollama etc.)
 python3 run.py --health               # diagnóstico de módulos/capacidades/ferramentas
 python3 run.py --check                # boot de verificação (usado no CI)
+python3 run.py --web                  # abre a interface local no navegador
+python3 run.py --web 9000             # escolhe outra porta para a interface web
 pip install -e .                      # opcional: comando global `joe`
 ```
+
+A interface web fica disponível apenas no próprio computador (`127.0.0.1`); comandos
+de shell solicitam confirmação na página antes de executar.
 
 ## Pipeline de agentes (visível na UI central, estilo grafo/n8n a ~35% opacidade)
 `intenção → classificador → planejador → executor → revisor → conclusão`, com sub-agentes
@@ -42,7 +47,8 @@ Ollama em CPU, contexto grande ou primeiro carregamento do modelo podem demorar 
 
 ## Memória e RAG (`joe/memory.py`)
 SQLite unificado (fatos, episódios, hábitos) + vetores; embeddings via ollama
-(`nomic-embed-text`) quando disponível, com fallback offline determinístico (hashing).
+(`nomic-embed-text-v2-moe`, configurável por `JOE_EMBED_MODEL`) quando disponível,
+com fallback offline determinístico (hashing).
 Busca híbrida (vetorial + lexical). `/remember`, `/recall`, `/rag`, `/predict`.
 
 ## Proatividade e autonomia (`joe/scheduler.py`)
@@ -51,7 +57,8 @@ eventos `suggest` viram a linha `✦ sugerido: …` no grafo; `/suggest` força 
 Auto-análise (`/analyze`), auto-cura (`/heal`) e auto-evolução (`/evolve`).
 
 ## Capacidades sensoriais (`joe/capabilities.py`)
-falar · ouvir · ver tela · câmera · celular (Termux/notificações) · criar imagem ·
+falar (Piper pt-BR em Python <3.15; eSpeak-NG/pyttsx3 como fallback, WAV sem saída de áudio) ·
+ouvir · ver tela · câmera · celular (Termux/notificações) · criar imagem ·
 editar vídeo · pesquisar web (DuckDuckGo com cascatas de fallback offline-first).
 Cada capacidade tem degradação graciosa quando o hardware/rede falta.
 
@@ -62,7 +69,8 @@ Cada capacidade tem degradação graciosa quando o hardware/rede falta.
 - **Auto-expansão do planner offline**: intenção sem playbook + ferramenta registrada
   (ex.: criada por extensão via `/newext`) → o executor a usa no mesmo turno, sem editar o núcleo.
 - **CI**: `.github/workflows/ci.yml` roda `run.py --check`, a suíte completa com piso de
-  cobertura ≥85% e smoke E2E offline em Python 3.10/3.12/3.13.
+  cobertura ≥91% e smoke E2E offline em Python 3.10–3.15. A suíte foi validada localmente
+  em Python 3.11, 3.12, 3.13, 3.14 e 3.15.
 
 ## Extensibilidade sem tocar o núcleo
 - Ferramentas: subclasses de `joe/tools/base.py` ou `FunctionTool` registrados no registry.
@@ -84,8 +92,8 @@ Cada capacidade tem degradação graciosa quando o hardware/rede falta.
 
 ## Testes
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/ -q -p no:libtmux           # 167 testes
-python3 -m pytest tests/ -q -p no:libtmux --cov=joe --cov-fail-under=85              # cobertura 87%
+python -m pip install -e ".[all,test]"
+python -m pytest tests/ -q --cov=joe --cov-report=term --cov-fail-under=91
 ```
 Suítes: smoke, unidades (agent/llm/core/config), ferramentas (shell/vision/web/memória),
 capacidades sensoriais, scheduler, superfície (grafo↔scheduler), IDE, REPL E2E interativo,
@@ -110,5 +118,5 @@ joe/
 │   ├── auto.py       # análise/cura/evolução
 │   ├── ide/          # mini-IDE de terminal
 │   └── tools/        # registry + ferramentas base
-└── tests/            # 19 arquivos, 167 testes
+└── tests/            # suíte automatizada
 ```

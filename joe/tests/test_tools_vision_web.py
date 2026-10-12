@@ -28,6 +28,8 @@ def test_analyze_image_sem_visao_usa_fallback(monkeypatch, tmp_path):
             return ["qwen2.5-coder:1.5b"]  # sem modelos de visão
 
     monkeypatch.setattr(vision_mod, "_vision_model", lambda p: False)
+    from joe import deps
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: (False, "sem binário"))
     from joe.llm import provider_registry
     monkeypatch.setattr(provider_registry, "active", lambda: FakeProv())
     # fallback: tenta OCR local; sem tesseract no container → aviso claro, nunca quebra
@@ -94,9 +96,12 @@ def test_analyze_image_usa_provider_multimodal_fake(tmp_path, monkeypatch):
     assert r.ok and "terminal aberto" in r.output
 
 
-def test_analyze_image_sem_provedor_cai_para_ocr_indisponivel(tmp_path):
+def test_analyze_image_sem_provedor_cai_para_ocr_indisponivel(tmp_path, monkeypatch):
     # sem tesseract/pytesseract no ambiente → cascata termina em aviso claro, nunca exceção
     img = tmp_path / "x.png"; img.write_bytes(b"x")
+    from joe import deps
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: (False, "sem binário"))
+    monkeypatch.setattr(deps, "ensure", lambda *a, **k: False)
     r = registry.execute("analyze_image", {"path": str(img)})
     assert not r.ok  # aviso explicando OCR/visão indisponíveis
     assert "OCR" in r.output or "visão" in r.output or "llava" in r.output
@@ -128,6 +133,9 @@ def test_ocr_tesseract_falha_e_pytesseract_indisponivel(tmp_path, monkeypatch):
     import joe.tools.vision as V
     img = tmp_path / "a.png"; img.write_bytes(b"x")
     monkeypatch.setattr(V.shutil, "which", lambda n: None)  # força caminho pytesseract
+    from joe import deps
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: (False, "sem binário"))
+    monkeypatch.setattr(deps, "ensure", lambda *a, **k: False)
     import sys
     sys.modules.pop("pytesseract", None)
     r = registry.execute("ocr_image", {"path": str(img)})

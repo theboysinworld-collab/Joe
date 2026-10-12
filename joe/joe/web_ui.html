@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173a31">
+  <title>Joe | Assistente pessoal</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --forest: #173a31;
+      --forest-soft: #254f43;
+      --paper: #fbfcf8;
+      --canvas: #eef2ed;
+      --ink: #182620;
+      --muted: #738078;
+      --line: #dce4dc;
+      --lime: #d9ef83;
+      --coral: #d87661;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background-color: var(--canvas);
+      background-image: linear-gradient(rgba(23, 58, 49, .035) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(23, 58, 49, .035) 1px, transparent 1px);
+      background-size: 34px 34px;
+      font-family: var(--sans);
+    }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .app { min-height: 100dvh; display: grid; grid-template-columns: 264px minmax(0, 1fr); }
+    .rail {
+      display: flex; flex-direction: column; gap: 34px; padding: 27px 20px;
+      color: #f0f4ed; background: var(--forest);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      display: grid; place-items: center; width: 39px; aspect-ratio: 1;
+      border-radius: 11px; color: var(--forest); background: var(--lime);
+      font: 700 22px var(--serif);
+    }
+    .brand-name { margin: 0; font: 32px/1 var(--serif); }
+    .brand-caption { margin: 5px 0 0; color: #a9bdb2; font-size: 11px; }
+    .rail-section { display: grid; gap: 10px; }
+    .rail-label { margin: 0 0 2px; color: #a9bdb2; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; }
+    .rail-button {
+      display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 11px;
+      border: 1px solid transparent; border-radius: 6px; color: inherit; text-align: left;
+      background: transparent;
+    }
+    .rail-button:hover, .rail-button.active { border-color: #45685d; background: #20463b; }
+    .rail-button .symbol { width: 18px; color: var(--lime); text-align: center; font-size: 17px; }
+    .rail-rule { height: 1px; background: #36564c; }
+    .rail-note { margin-top: auto; padding-top: 16px; border-top: 1px solid #36564c;
+      color: #c0cec6; font-size: 12px; line-height: 1.6; }
+    .workspace { display: grid; grid-template-rows: 70px minmax(0, 1fr); min-width: 0; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 18px;
+      padding: 0 34px; border-bottom: 1px solid rgba(23, 58, 49, .12);
+      background: rgba(251, 252, 248, .76); backdrop-filter: blur(12px);
+    }
+    .top-title { font-size: 13px; font-weight: 700; }
+    .status { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+    .status-dot { width: 8px; aspect-ratio: 1; border-radius: 50%; background: #64a67f; }
+    .status-detail { padding-left: 9px; border-left: 1px solid var(--line); }
+    .main { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+    .flow-overlay {
+      position: absolute; inset: 82px 20px 130px 290px; pointer-events: none;
+      border: 1px solid rgba(23, 58, 49, 0.14); border-radius: 18px; background: rgba(245, 248, 243, .38);
+      backdrop-filter: blur(8px); overflow: hidden; box-shadow: 0 18px 46px rgba(17, 40, 33, .08);
+    }
+    .flow-overlay::before {
+      content: ""; position: absolute; inset: 0; background: linear-gradient(120deg, rgba(104, 166, 127, .08), rgba(217, 239, 131, .06));
+    }
+    .flow-layer {
+      position: absolute; inset: 0; display: grid; place-items: center; opacity: .72;
+    }
+    .flow-nodes {
+      position: relative; width: min(720px, 82%); height: min(420px, 74%); 
+    }
+    .flow-node {
+      position: absolute; min-width: 110px; max-width: 180px; padding: 8px 10px; border: 1px solid rgba(23, 58, 49, 0.18);
+      border-radius: 999px; background: rgba(255,255,255,.62); color: var(--forest); font-size: 11px; font-weight: 700;
+      letter-spacing: .03em; text-transform: uppercase; box-shadow: 0 8px 18px rgba(23,58,49,.08);
+    }
+    .flow-node::after {
+      content: ""; position: absolute; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent;
+      border-top: 12px solid rgba(255,255,255,.72); left: 50%; bottom: -10px; transform: translateX(-50%);
+    }
+    .flow-legend {
+      position: absolute; right: 15px; bottom: 12px; padding: 8px 10px; border-radius: 999px; background: rgba(23,58,49,.80);
+      color: #ecf4eb; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .conversation { width: min(860px, 100%); margin: 0 auto; padding: 50px 34px 28px;
+      overflow-y: auto; }
+    .welcome { max-width: 680px; margin: 6vh auto 40px; animation: arrive .45s ease-out both; }
+    .welcome-kicker { display: flex; align-items: center; gap: 9px; color: var(--forest-soft);
+      font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .welcome-kicker::before { width: 23px; height: 2px; content: ""; background: var(--coral); }
+    .welcome h1 { margin: 19px 0 12px; max-width: 650px; font: 54px/1.05 var(--serif); }
+    .welcome h1 em { color: #4c7c5e; font-weight: 400; }
+    .welcome-copy { max-width: 500px; margin: 0; color: #637068; font-size: 15px; line-height: 1.7; }
+    .suggestions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 29px; }
+    .suggestion {
+      padding: 9px 13px; border: 1px solid #cbd7ce; border-radius: 5px;
+      color: #29483c; background: rgba(251, 252, 248, .7); font-size: 12px;
+      transition: border-color .15s, background .15s, transform .15s;
+    }
+    .suggestion:hover { transform: translateY(-1px); border-color: #71957e; background: #fff; }
+    .feed { display: grid; gap: 24px; }
+    .message { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px;
+      max-width: 740px; animation: arrive .22s ease-out both; }
+    .message.user { grid-template-columns: minmax(0, 1fr); justify-items: end; margin-left: auto; }
+    .avatar { display: grid; place-items: center; width: 32px; aspect-ratio: 1; border-radius: 9px;
+      color: var(--forest); background: var(--lime); font: 700 17px var(--serif); }
+    .message-body { min-width: 0; }
+    .message-label { margin: 2px 0 7px; color: var(--muted); font-size: 11px; }
+    .message-text { margin: 0; color: #28362f; font-size: 14px; line-height: 1.7;
+      white-space: pre-wrap; overflow-wrap: anywhere; }
+    .message.user .message-text { max-width: min(620px, 100%); padding: 11px 15px; border-radius: 8px 8px 2px 8px;
+      color: #f7faf5; background: var(--forest-soft); }
+    .message.user .message-label { text-align: right; }
+    .message.pending .message-text { color: var(--muted); }
+    .composer-wrap { padding: 14px 28px 22px; background: linear-gradient(transparent, rgba(238, 242, 237, .96) 25%); }
+    .composer { width: min(790px, 100%); margin: 0 auto; padding: 10px 11px 9px 17px;
+      border: 1px solid #cbd6cd; border-radius: 8px; background: var(--paper);
+      box-shadow: 0 10px 32px rgba(35, 67, 52, .08); }
+    .composer:focus-within { border-color: #6e9b7b; box-shadow: 0 0 0 3px rgba(83, 137, 99, .12); }
+    .composer textarea { display: block; width: 100%; min-height: 32px; max-height: 160px; resize: vertical;
+      border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 14px; line-height: 1.5; }
+    .composer textarea::placeholder { color: #87938a; }
+    .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; }
+    .composer-hint { color: #89948c; font-size: 10px; }
+    .send-button { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border: 0;
+      border-radius: 5px; color: #fff; background: var(--forest); font-size: 12px; font-weight: 700; }
+    .send-button:hover { background: #28594a; }
+    .send-button:disabled { cursor: wait; opacity: .55; }
+    .approval-backdrop { width: min(520px, calc(100% - 28px)); padding: 25px; border: 1px solid var(--line);
+      border-radius: 8px; color: var(--ink); background: var(--paper); box-shadow: 0 24px 80px #11291f55; }
+    .approval-backdrop::backdrop { background: #10231eb8; }
+    .approval-backdrop h2 { margin: 0 0 10px; font: 27px var(--serif); }
+    .approval-command { max-height: 180px; overflow: auto; padding: 12px; border-radius: 5px;
+      color: #e8f0e9; background: #1b342c; font: 12px/1.55 monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .approval-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+    .approval-actions button { padding: 9px 13px; border: 1px solid var(--line); border-radius: 5px; background: white; }
+    .approval-actions .approve { border-color: var(--forest); color: white; background: var(--forest); }
+    @keyframes arrive { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+      .rail { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0; padding: 12px 16px; }
+      .brand-mark { width: 34px; border-radius: 9px; font-size: 19px; }
+      .brand-name { font-size: 27px; }
+      .brand-caption, .rail-section, .rail-rule, .rail-note { display: none; }
+      .mobile-new { display: block !important; width: auto !important; padding: 8px 10px !important; font-size: 12px; }
+      .workspace { grid-template-rows: 52px minmax(0, 1fr); min-height: calc(100dvh - 58px); }
+      .topbar { padding: 0 16px; }
+      .conversation { padding: 30px 18px 22px; }
+      .welcome { margin: 5vh auto 30px; }
+      .welcome h1 { font-size: 42px; }
+      .welcome-copy { font-size: 14px; }
+      .composer-wrap { padding: 10px 12px 14px; }
+      .composer-hint { display: none; }
+    }
+    @media (min-width: 761px) { .mobile-new { display: none; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail" aria-label="Navegação">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">J</div><div><h1 class="brand-name">Joe</h1><p class="brand-caption">assistente pessoal</p></div></div>
+      <button class="rail-button mobile-new" id="new-chat-mobile" type="button"><span class="symbol" aria-hidden="true">+</span> Nova conversa</button>
+      <div class="rail-section">
+        <p class="rail-label">Espaço de trabalho</p>
+        <button class="rail-button active" type="button"><span class="symbol" aria-hidden="true">◉</span> Conversa</button>
+        <button class="rail-button" id="new-chat" type="button"><span class="symbol" aria-hidden="true">＋</span> Nova conversa</button>
+      </div>
+      <div class="rail-rule"></div>
+      <div class="rail-section">
+        <p class="rail-label">Começar por</p>
+        <button class="rail-button quick" type="button" data-prompt="Quais arquivos estão na pasta atual?"><span class="symbol" aria-hidden="true">⌕</span> Explorar arquivos</button>
+        <button class="rail-button quick" type="button" data-prompt="Lembre-se que meu nome é "><span class="symbol" aria-hidden="true">＋</span> Guardar uma lembrança</button>
+        <button class="rail-button quick" type="button" data-prompt="Me ajude a organizar minhas tarefas de hoje."><span class="symbol" aria-hidden="true">↗</span> Organizar meu dia</button>
+      </div>
+      <div class="rail-note">Local · seus dados ficam no ambiente do Joe</div>
+    </aside>
+    <section class="workspace">
+      <header class="topbar">
+        <div class="top-title">Conversa</div>
+        <div class="status" aria-live="polite"><span class="status-dot"></span><span id="provider">Conectando</span><span class="status-detail" id="tool-count"></span></div>
+      </header>
+      <main class="main">
+        <div class="flow-overlay" aria-label="Mapa visual do fluxo do agente" aria-live="polite">
+          <div class="flow-layer">
+            <div class="flow-nodes" id="flow-nodes"></div>
+          </div>
+          <div class="flow-legend">fluxo do agente</div>
+        </div>
+        <section class="conversation" id="conversation" aria-live="polite" aria-label="Conversa com Joe">
+          <div class="welcome" id="welcome">
+            <div class="welcome-kicker">Seu assistente, no seu ritmo</div>
+            <h1>Bom ter você <em>por aqui.</em></h1>
+            <p class="welcome-copy">O que vamos resolver agora?</p>
+            <div class="suggestions">
+              <button class="suggestion quick" type="button" data-prompt="Quais arquivos estão na pasta atual?">Explorar arquivos</button>
+              <button class="suggestion quick" type="button" data-prompt="Lembre-se que meu nome é ">Guardar uma lembrança</button>
+              <button class="suggestion quick" type="button" data-prompt="Me ajude a organizar minhas tarefas de hoje.">Organizar meu dia</button>
+            </div>
+          </div>
+          <div class="feed" id="feed"></div>
+        </section>
+        <div class="composer-wrap">
+          <form class="composer" id="composer">
+            <textarea id="message" rows="1" maxlength="4000" aria-label="Mensagem para Joe" placeholder="Escreva sua mensagem..."></textarea>
+            <div class="composer-bottom"><span class="composer-hint">Enter envia · Shift+Enter quebra a linha</span>
+              <button class="send-button" id="send" type="submit">Enviar <span aria-hidden="true">↗</span></button></div>
+          </form>
+        </div>
+      </main>
+    </section>
+  </div>
+  <dialog class="approval-backdrop" id="approval-dialog" aria-labelledby="approval-title">
+    <h2 id="approval-title">Permitir comando?</h2>
+    <p>Joe solicitou autorização para executar esta ação no ambiente local.</p>
+    <pre class="approval-command" id="approval-prompt"></pre>
+    <div class="approval-actions"><button id="deny-command" type="button">Negar</button><button class="approve" id="approve-command" type="button">Permitir execução</button></div>
+  </dialog>
+  <script>
+    const conversation = document.querySelector('#conversation');
+    const feed = document.querySelector('#feed');
+    const welcome = document.querySelector('#welcome');
+    const form = document.querySelector('#composer');
+    const input = document.querySelector('#message');
+    const send = document.querySelector('#send');
+    const dialog = document.querySelector('#approval-dialog');
+    let activeApproval = null;
+    let busy = false;
+
+    function addMessage(kind, text, pending = false) {
+      welcome.hidden = true;
+      const item = document.createElement('article');
+      item.className = `message ${kind}${pending ? ' pending' : ''}`;
+      if (kind === 'assistant') {
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        avatar.textContent = 'J';
+        avatar.setAttribute('aria-hidden', 'true');
+        item.append(avatar);
+      }
+      const body = document.createElement('div');
+      body.className = 'message-body';
+      const label = document.createElement('div');
+      label.className = 'message-label';
+      label.textContent = kind === 'user' ? 'Você' : 'Joe';
+      const content = document.createElement('p');
+      content.className = 'message-text';
+      content.textContent = text;
+      body.append(label, content);
+      item.append(body);
+      feed.append(item);
+      conversation.scrollTop = conversation.scrollHeight;
+      return item;
+    }
+
+    async function sendMessage(text = input.value.trim()) {
+      if (!text || busy) return;
+      busy = true;
+      send.disabled = true;
+      input.value = '';
+      addMessage('user', text);
+      const pending = addMessage('assistant', 'Joe está pensando…', true);
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text })
+        });
+        const result = await response.json();
+        pending.remove();
+        addMessage('assistant', response.ok ? result.reply : result.error || 'Não foi possível enviar a mensagem.');
+      } catch (error) {
+        pending.remove();
+        addMessage('assistant', 'Não consegui conectar ao Joe. Verifique se o servidor continua ativo.');
+      } finally {
+        busy = false;
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
+    async function loadStatus() {
+      try {
+        const response = await fetch('/api/status');
+        const status = await response.json();
+        document.querySelector('#provider').textContent = status.provider === 'offline-planner'
+          ? 'Modo offline' : status.provider;
+        document.querySelector('#tool-count').textContent = `${status.tools} ferramentas`;
+      } catch (error) {
+        document.querySelector('#provider').textContent = 'Desconectado';
+      }
+    }
+
+    function renderFlow(events) {
+      const panel = document.querySelector('#flow-nodes');
+      if (!panel) return;
+      const stream = (events || []).slice(-8);
+      const palette = ['#173a31', '#4d7d62', '#d87661', '#6d86a6', '#d9ef83'];
+      panel.innerHTML = '';
+      const anchors = [
+        {x: 10, y: 16, label: 'intenção'},
+        {x: 28, y: 60, label: 'planejamento'},
+        {x: 54, y: 34, label: 'execução'},
+        {x: 72, y: 62, label: 'revisão'},
+        {x: 88, y: 34, label: 'conclusão'}
+      ];
+      anchors.forEach((node, index) => {
+        const item = document.createElement('div');
+        item.className = 'flow-node';
+        item.style.left = `${node.x}%`;
+        item.style.top = `${node.y}%`;
+        item.style.background = `rgba(255,255,255,.72)`;
+        item.style.borderColor = palette[index % palette.length] + '55';
+        item.style.color = '#173a31';
+        item.textContent = node.label;
+        panel.append(item);
+      });
+      const trail = stream.slice(-3).map((evt, idx) => {
+        const item = document.createElement('div');
+        item.style.position = 'absolute';
+        item.style.left = `${16 + idx * 26}%`;
+        item.style.top = `${74 - idx * 8}%`;
+        item.style.fontSize = '9px';
+        item.style.color = '#29483c';
+        item.style.padding = '4px 6px';
+        item.style.borderRadius = '999px';
+        item.style.background = 'rgba(255,255,255,.68)';
+        item.style.border = '1px solid rgba(23,58,49,.14)';
+        item.textContent = (evt.tool || evt.role || evt.topic || 'evento').replace(/^agent\./, '').slice(0, 18);
+        panel.append(item);
+      });
+      if (!trail.length) {
+        const idle = document.createElement('div');
+        idle.style.position = 'absolute';
+        idle.style.left = '38%';
+        idle.style.top = '62%';
+        idle.style.fontSize = '10px';
+        idle.style.color = '#567067';
+        idle.textContent = 'inativo';
+        panel.append(idle);
+      }
+    }
+
+    async function loadFlow() {
+      try {
+        const response = await fetch('/api/flow');
+        const data = await response.json();
+        renderFlow(data.flow || []);
+      } catch (error) {
+        renderFlow([]);
+      }
+    }
+
+    async function newConversation() {
+      if (busy) return;
+      const response = await fetch('/api/reset', { method: 'POST' });
+      if (!response.ok) return;
+      feed.replaceChildren();
+      welcome.hidden = false;
+      input.focus();
+    }
+
+    async function pollApproval() {
+      try {
+        const response = await fetch('/api/approval');
+        const data = await response.json();
+        const next = data.approval;
+        if (next && next.id !== activeApproval) {
+          activeApproval = next.id;
+          document.querySelector('#approval-prompt').textContent = next.prompt;
+          dialog.showModal();
+        }
+      } catch (error) { /* a pending chat displays its own connection error */ }
+    }
+
+    async function answerApproval(approved) {
+      if (!activeApproval) return;
+      const id = activeApproval;
+      activeApproval = null;
+      dialog.close();
+      await fetch('/api/approval', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, approved })
+      });
+    }
+
+    form.addEventListener('submit', event => { event.preventDefault(); sendMessage(); });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); }
+    });
+    document.querySelectorAll('.quick').forEach(button => button.addEventListener('click', () => {
+      input.value = button.dataset.prompt;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }));
+    document.querySelectorAll('#new-chat, #new-chat-mobile').forEach(button => button.addEventListener('click', newConversation));
+    document.querySelector('#deny-command').addEventListener('click', () => answerApproval(false));
+    document.querySelector('#approve-command').addEventListener('click', () => answerApproval(true));
+    loadStatus();
+    loadFlow();
+    window.setInterval(pollApproval, 500);
+    window.setInterval(loadFlow, 2000);
+  </script>
+</body>
+</html>

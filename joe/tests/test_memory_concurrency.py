@@ -1,6 +1,10 @@
 """Testes estruturais de concorrência (varredura staff): corrida real entre REPL/scheduler."""
+import gc
+import sqlite3
 import threading
 from pathlib import Path
+
+import pytest
 
 from joe.memory import Memory
 
@@ -50,3 +54,14 @@ def test_encode_nao_derruba_com_provider_quebrado(tmp_path, monkeypatch):
     hits = m.search("provider quebrado")                     # idem na leitura
     assert fid and any("provider quebrado" in h["text"] for h in hits)
     m.close()
+
+
+def test_memory_fecha_conexao_ao_ser_coletada(tmp_path):
+    memory = Memory(tmp_path / "finalizer.db")
+    connection = memory.conn
+
+    del memory
+    gc.collect()
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")

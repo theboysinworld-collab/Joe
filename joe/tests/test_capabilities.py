@@ -63,7 +63,9 @@ def test_ouvir_indisponivel_avisa_claramente(fake_which):
 # ---------------------------------------------------------------- ver tela
 def test_ver_tela_sem_ferramenta_avisa(fake_which, monkeypatch):
     fake_which(set())
-    monkeypatch.setattr(C.os, "uname", lambda: type("U", (), {"sysname": "Linux"})())
+    monkeypatch.setattr(C.platform, "system", lambda: "Linux")
+    from joe import deps
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: (False, "sem gerenciador"))
     cap = C.ScreenCapability()
     assert not cap.available()
     assert "indispon" in cap.perceive().lower()
@@ -81,9 +83,55 @@ def test_ver_tela_scrot_salva_arquivo(fake_which, monkeypatch, tmp_path):
     assert out_file.exists() and "screenshot salvo" in res
 
 
+def test_ver_tela_windows_powershell(fake_which, monkeypatch, tmp_path):
+    fake_which({"powershell"})
+    monkeypatch.setattr(C.platform, "system", lambda: "Windows")
+    out_file = tmp_path / "tela.png"
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        out_file.write_bytes(b"\x89PNG")
+        return FakeProc()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    cap = C.ScreenCapability()
+    assert cap.available()
+    result = cap.perceive(out_path=str(out_file))
+    assert "screenshot salvo" in result
+    assert calls[0][0] == "/usr/bin/powershell"
+    assert "CopyFromScreen" in calls[0][-1]
+
+
+def test_capability_status_nao_instala_dependencias(monkeypatch):
+    from joe import deps
+
+    calls = []
+    monkeypatch.setattr(C.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        deps,
+        "ensure",
+        lambda module, package=None, *, allow_install=True: calls.append(
+            (module, package, allow_install)
+        ) or False,
+    )
+    monkeypatch.setattr(
+        deps,
+        "ensure_bin",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("não pode instalar")),
+    )
+
+    assert not C.SpeechCapability().available()
+    assert not C.ImageGenCapability().available()
+    assert calls == [("pyttsx3", None, False), ("PIL", "pillow", False)]
+
+
 # ---------------------------------------------------------------- câmera
-def test_camera_sem_backend_avisa(fake_which):
+def test_camera_sem_backend_avisa(fake_which, monkeypatch):
     fake_which(set())
+    from joe import deps
+    monkeypatch.delenv("PREFIX", raising=False)
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: (False, "sem gerenciador"))
     cap = C.CameraCapability()
     assert not cap.available()
     assert "indispon" in cap.perceive().lower()
@@ -128,11 +176,31 @@ def test_celular_acao_desconhecida_reporteia(fake_which):
 
 
 # ---------------------------------------------------------------- vídeo
-def test_video_sem_ffmpeg_avisa(fake_which):
+def test_video_sem_ffmpeg_avisa(fake_which, monkeypatch):
     fake_which(set())
+    from joe import deps
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: (False, "sem gerenciador"))
     cap = C.VideoEditCapability()
     assert not cap.available()
     assert "ffmpeg" in cap.perceive(action="trim", src="a.mp4", dst="b.mp4")
+
+
+def test_video_tenta_instalar_ffmpeg_ao_ser_usado(monkeypatch):
+    installed = set()
+    calls = []
+    monkeypatch.setattr(C.shutil, "which", lambda name: f"/x/{name}" if name in installed else None)
+
+    def install(name, **kwargs):
+        calls.append(name)
+        installed.add(name)
+        return True, "instalado"
+
+    monkeypatch.setattr("joe.deps.ensure_bin", install)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeProc())
+    result = C.VideoEditCapability().perceive(action="trim", src="a.mp4", dst="b.mp4")
+
+    assert calls == ["ffmpeg"]
+    assert "trim ok" in result
 
 
 def test_video_trim_monta_comando_correto(fake_which, monkeypatch):
