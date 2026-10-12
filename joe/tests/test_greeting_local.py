@@ -1,11 +1,14 @@
 """Saudação offline: o Joe responde localmente (sem LLM), lembra o nome e agradece."""
 import os, subprocess, sys
+from pathlib import Path
 from joe.agents import classify_intent, deterministic_plan, greeting_reply
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _run_once(tmp_path, text, home):
     env = dict(os.environ, JOE_HOME=str(home))
-    r = subprocess.run([sys.executable, "run.py", "--once", text], cwd="/workspace/joe",
+    r = subprocess.run([sys.executable, "run.py", "--once", text], cwd=ROOT,
                        capture_output=True, text=True, timeout=90, env=env)
     return r.stdout + r.stderr
 
