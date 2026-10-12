@@ -38,7 +38,7 @@ class Config:
     shell_output_limit: int = 8192
     language: str = "pt-BR"
     # embedding local (ollama) para RAG vetorial; fallback: hashing determinístico
-    embed_model: str = "nomic-embed-text"
+    embed_model: str = os.environ.get("JOE_EMBED_MODEL", "nomic-embed-text-v2-moe")
     chat_hint: str = "qwen2.5-coder"                      # preferência de nome (substring)
     extra: dict = field(default_factory=dict)
 

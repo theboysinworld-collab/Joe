@@ -70,6 +70,11 @@ def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: in
             with urllib.request.urlopen(req, timeout=to) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
+            try:
+                e._joe_body = e.read()
+            except Exception:
+                e._joe_body = b""
+            e.close()
             # 4xx = erro real do pedido (não adianta repetir); 5xx = servidor ocupado/caiu → retry
             if 400 <= e.code < 500:
                 raise
@@ -100,7 +105,12 @@ def set_llm_timeout(seconds: int) -> None:
 
 def _get_json(url: str, headers: dict | None = None, timeout: int = 10) -> dict:
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
+    with resp:
         return json.loads(resp.read().decode())
 
 
@@ -194,7 +204,11 @@ class OpenAICompatProvider(Provider):
             data = _post_json(f"{self.base_url}/chat/completions", payload,
                               {"Authorization": f"Bearer {self.api_key}"})
         except urllib.error.HTTPError as e:
-            raise LLMError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}") from e
+            body = getattr(e, "_joe_body", None)
+            if body is None:
+                body = e.read()
+                e.close()
+            raise LLMError(f"HTTP {e.code}: {body.decode(errors='replace')[:300]}") from e
         except urllib.error.URLError as e:
             raise LLMError(f"rede: {e.reason}") from e
         return data["choices"][0]["message"]

@@ -19,7 +19,7 @@ class FakeResp:
 
 def make_provider():
     c = Config(ollama_host="http://fake:1", model="qwen2.5-coder:1.5b",
-               embed_model="nomic-embed-text")
+               embed_model="nomic-embed-text-v2-moe")
     return OllamaProvider(c)
 
 

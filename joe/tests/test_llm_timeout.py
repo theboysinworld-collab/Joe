@@ -1,6 +1,9 @@
 """Timeout configurável de LLM: modelos locais lentos (>120s) não devem quebrar o Joe."""
 import time
+import io
 import urllib.error
+
+import pytest
 
 from joe import llm
 from joe.config import Config
@@ -41,6 +44,31 @@ def test_agent_inicializa_timeout_sem_llm_disponivel(tmp_path, monkeypatch):
     from joe.agent import Agent
     a = Agent(config=Config.load())
     assert llm._LLM_TIMEOUT[0] >= 5      # nunca zero/negativo
+
+
+def test_get_json_fecha_http_error(monkeypatch):
+    body = io.BytesIO(b"unauthorized")
+    error = urllib.error.HTTPError("http://example.test/models", 401, "unauthorized", {}, body)
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(error))
+
+    with pytest.raises(urllib.error.HTTPError):
+        llm._get_json("http://example.test/models")
+
+    assert body.closed
+
+
+def test_post_json_fecha_4xx_e_preserva_mensagem(monkeypatch):
+    from joe.llm import LLMError, OpenAICompatProvider
+
+    body = io.BytesIO(b"token expirado")
+    error = urllib.error.HTTPError("http://example.test/chat", 401, "unauthorized", {}, body)
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(error))
+    provider = OpenAICompatProvider(Config.load(), "test", "http://example.test/v1", "test-key")
+
+    with pytest.raises(LLMError, match="token expirado"):
+        provider.chat([{"role": "user", "content": "oi"}], None)
+
+    assert body.closed
 
 
 def test_slash_config_llm_timeout_aplica_imediato(tmp_path, monkeypatch):

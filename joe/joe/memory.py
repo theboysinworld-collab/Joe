@@ -21,6 +21,7 @@ import math
 import re
 import sqlite3
 import time
+import weakref
 from pathlib import Path
 
 from .config import DB_PATH, MEMORY_PATH, Config
@@ -65,18 +66,24 @@ class Memory:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self._connection_finalizer = weakref.finalize(self, self.conn.close)
             self._init_schema()
         except sqlite3.DatabaseError:
             # auto-cura na abertura: banco ilegível → backup .bak + recriação limpa
-            try:
-                self.conn.close()
-            except Exception:
-                pass
+            finalizer = getattr(self, "_connection_finalizer", None)
+            if finalizer is not None and finalizer.alive:
+                finalizer()
+            else:
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
             bak = self.db_path.with_name(self.db_path.stem + ".db.bak")
             if bak.exists():
                 bak.unlink()
             self.db_path.rename(bak)
             self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self._connection_finalizer = weakref.finalize(self, self.conn.close)
             self._init_schema()
         # lock de escrita (reentrante): scheduler roda em thread daemon e REPL/
         # sub-agentes na main — sqlite não serializa conexões compartilhadas.
@@ -269,4 +276,12 @@ class Memory:
         return f"MEMÓRIA PERSISTENTE (SQLite, sessões anteriores):\n{lines}"
 
     def close(self) -> None:
-        self.conn.close()
+        finalizer = getattr(self, "_connection_finalizer", None)
+        if finalizer is not None and finalizer.alive:
+            finalizer()
+
+    def __enter__(self) -> "Memory":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()

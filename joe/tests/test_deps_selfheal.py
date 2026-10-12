@@ -14,7 +14,7 @@ def test_have_e_status_nao_instalam(monkeypatch):
     monkeypatch.setattr(deps, "_pip_install", lambda *a, **k: (_ for _ in ()).throw(AssertionError("não pode instalar")))
     assert deps.have("json") is True          # stdlib sempre importa
     st = deps.status()                        # passivo: não toca pip
-    assert set(st) == {"PIL", "pyttsx3", "numpy"}
+    assert set(st) == {"PIL", "pyttsx3", "piper", "numpy", "pytesseract"}
 
 
 def test_ensure_modulo_falso_falha_gracioso(monkeypatch):
@@ -113,7 +113,10 @@ def test_capacidades_usam_auto_download(monkeypatch):
     assert SpeechCapability()._engine() == ""
 
 
-def test_health_reporta_dependencias_e_fallbacks():
+def test_health_reporta_dependencias_e_fallbacks(monkeypatch):
+    monkeypatch.setattr(deps, "status", lambda: {
+        "PIL": False, "pyttsx3": True, "numpy": False, "pytesseract": False,
+    })
     from joe.tools.base import bootstrap_tools
     from joe.tools.base import registry
     bootstrap_tools()   # registra health_check etc.
@@ -121,4 +124,77 @@ def test_health_reporta_dependencias_e_fallbacks():
     out = r.output
     assert "Dependências opcionais" in out
     assert "fallback" in out or "ok" in out
+    assert "instalação sob demanda" in out
     assert "Binários externos" in out
+    assert "Runtime e compatibilidade" in out
+    assert "Flutter:" in out
+
+
+def test_runtime_reporta_ambientes_e_flutter(monkeypatch):
+    monkeypatch.setattr(deps, "_candidate_flutter_roots", lambda: ["/tmp/flutter-sdk"])
+    monkeypatch.setattr(deps.Path, "exists", lambda self: str(self) == "/tmp/flutter-sdk/bin/flutter")
+    report = deps.environment_report()
+    assert "platform" in report
+    assert "runtime_modes" in report
+    assert "flutter" in report["runtime_modes"]
+    assert report["runtime_modes"]["flutter"] == "toolchain-available"
+    assert report["runtime_modes"]["python"] == "full-runtime"
+    assert report["install_plan"] == []
+    assert "PIL" in report["python_modules"]
+    assert report["python_modules"]["PIL"]["package"] == "pillow"
+    assert "optional_setup" in report
+
+
+def test_runtime_reporta_sdks_por_variaveis_de_ambiente(monkeypatch):
+    monkeypatch.setenv("FLUTTER_ROOT", "/tmp/flutter-sdk")
+    monkeypatch.setenv("DART_SDK", "/tmp/dart-sdk")
+    monkeypatch.setattr(deps.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        deps.Path,
+        "exists",
+        lambda path: str(path) in {
+            "/tmp/flutter-sdk/bin",
+            "/tmp/dart-sdk/bin",
+            "/tmp/flutter-sdk/bin/flutter",
+            "/tmp/dart-sdk/bin/dart",
+        },
+    )
+
+    report = deps.environment_report()
+
+    assert report["flutter"] == {"available": True, "path": "/tmp/flutter-sdk/bin/flutter"}
+    assert report["dart"] == {"available": True, "path": "/tmp/dart-sdk/bin/dart"}
+
+
+def test_ensure_runtime_environment_sem_features_e_passivo(monkeypatch):
+    report = {"python_modules": {}, "platform": {}, "optional_setup": []}
+    monkeypatch.setattr(deps, "environment_report", lambda: report)
+    monkeypatch.setattr(deps, "ensure", lambda *a, **k: pytest.fail("pip não deveria ser chamado"))
+    monkeypatch.setattr(deps, "ensure_bin", lambda *a, **k: pytest.fail("instalador do sistema não deveria ser chamado"))
+
+    assert deps.ensure_runtime_environment() is report
+
+
+def test_ensure_runtime_environment_instala_apenas_features_pedidas(monkeypatch):
+    def make_report():
+        return {
+            "python_modules": {
+                "PIL": {"available": False},
+                "numpy": {"available": False},
+            },
+            "platform": {"termux": False},
+            "optional_setup": [],
+        }
+
+    installs = []
+    binaries = []
+    monkeypatch.setattr(deps, "environment_report", make_report)
+    monkeypatch.setattr(deps, "ensure", lambda *a, **k: installs.append((a, k)) or False)
+    monkeypatch.setattr(deps, "ensure_bin", lambda name, **k: binaries.append(name) or (False, "missing"))
+    monkeypatch.setattr(deps.shutil, "which", lambda _: None)
+
+    result = deps.ensure_runtime_environment(["image", "video", "phone"])
+
+    assert installs == [(("PIL", "pillow"), {"allow_install": True})]
+    assert binaries == ["ffmpeg"]
+    assert any("phone: requer Termux/Android" in item for item in result["optional_setup"])

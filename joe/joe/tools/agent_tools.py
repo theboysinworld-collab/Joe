@@ -104,13 +104,21 @@ class HealthCheckTool(Tool):
         lines.append(f"— Extensões ({len(exts)}) —")
         lines += [f"{'✅' if 'error' not in m else '❌'} {m['name']}" for m in exts.values()]
         # dependências opcionais: o que falta, se dá pra baixar, e o fallback de cada uma
-        from ..deps import status as dep_status, tools_status
+        from ..deps import environment_report, status as dep_status, tools_status
+        env = environment_report()
+        host = env["platform"]
+        lines.append("— Runtime e compatibilidade —")
+        host_name = f"{host['system']} {host['machine']}"
+        if host["termux"]:
+            host_name += " (Termux)"
+        lines.append(f"Host: {host_name}")
+        lines.append(f"Python {host['python']}: {env['runtime_modes']['python']}")
+        flutter_status = "SDK encontrado" if env["flutter"]["available"] else "SDK ausente"
+        lines.append(f"Flutter: {flutter_status} (build nativo não validado por detecção)")
         lines.append("— Dependências opcionais (pip) —")
-        fb = {"PIL": "descrição textual do prompt", "pyttsx3": "say/espeak → texto puro",
-              "numpy": "vetor puro-Python (mais lento, funciona)"}
         for m, ok in dep_status().items():
             lines.append(f"{'✅' if ok else '⚠️'} {m}: "
-                         + ("ok" if ok else f"ausente/quebrada → tento baixar sozinho; fallback: {fb.get(m, 'modo offline')}"))
+                         + ("ok" if ok else "ausente/quebrada → instalação sob demanda; fallback: modo offline"))
         miss = [b for b, ok in tools_status().items() if not ok]
         lines.append(f"— Binários externos ausentes: {', '.join(miss) or '(nenhum)'} —")
         return ToolResult(output="\n".join(lines))
